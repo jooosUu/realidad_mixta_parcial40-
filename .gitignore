@@ -1,0 +1,42 @@
+# Unity generated files
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+
+# Asset store packages
+[Aa]ssets/AssetStoreTools*
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+.vsconfig
+*.slnx
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+
+# Unity log and lock files
+sysinfo.txt
+*.stackdump
+*.pidb.meta
+*.pdb.meta
+*.log
+
+# OS generated
+.DS_Store
+Thumbs.db
+desktop.ini
