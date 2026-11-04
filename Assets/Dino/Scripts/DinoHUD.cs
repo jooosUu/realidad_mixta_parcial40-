@@ -26,14 +26,7 @@ namespace DinoVehicle
             // Tecla R para reiniciar posición si se cae o se traba
             if (Input.GetKeyDown(KeyCode.R) && vehicle != null)
             {
-                vehicle.transform.position = new Vector3(0f, 1.5f, 0f);
-                vehicle.transform.rotation = Quaternion.identity;
-                Rigidbody rb = vehicle.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.linearVelocity = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
-                }
+                vehicle.ResetToSpawn();
             }
         }
 

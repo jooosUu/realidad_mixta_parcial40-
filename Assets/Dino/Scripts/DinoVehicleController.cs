@@ -44,6 +44,7 @@ namespace DinoVehicle
 
         // Estados y telemetría
         public float CurrentSpeedKmh => currentForwardSpeed * 3.6f;
+        public Vector3 PlanarVelocity => transform.forward * currentForwardSpeed;
         public float SpeedRatio => Mathf.Abs(currentForwardSpeed) / (maxForwardSpeed * boostMultiplier);
         public bool IsGrounded { get; private set; } = true;
         public bool IsBoosting { get; private set; } = false;
@@ -62,6 +63,7 @@ namespace DinoVehicle
         private bool placedOnGround = false;
         private Vector3 spawnPosition;
         private Quaternion spawnRotation;
+        private float impactLockTimer = 0f;
 
         private void Awake()
         {
@@ -80,6 +82,7 @@ namespace DinoVehicle
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            col.providesContacts = true;
             spawnPosition = transform.position;
             spawnRotation = transform.rotation;
 
@@ -230,9 +233,23 @@ namespace DinoVehicle
         {
             if (input == null) return;
 
+            if (impactLockTimer > 0f)
+            {
+                impactLockTimer -= Time.fixedDeltaTime;
+            }
+
             // Calcular velocidad local hacia adelante
             Vector3 localVel = transform.InverseTransformDirection(rb.linearVelocity);
             currentForwardSpeed = localVel.z;
+
+            // Durante la reacción no se vuelve a acelerar contra el tronco.
+            if (impactLockTimer > 0f)
+            {
+                Vector3 held = transform.forward * currentForwardSpeed;
+                held.y = rb.linearVelocity.y;
+                rb.linearVelocity = held;
+                return;
+            }
 
             float throttle = input.throttle;
             float steer = input.steering;
@@ -337,7 +354,7 @@ namespace DinoVehicle
 
         /// <summary>
         /// Sincroniza la velocidad de tracción después de un impulso externo,
-        /// para que el siguiente FixedUpdate no borre el rebote.
+        /// para que el siguiente FixedUpdate no borre la reacción.
         /// </summary>
         public void NotifyExternalVelocityChange()
         {
@@ -345,12 +362,24 @@ namespace DinoVehicle
             currentForwardSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
         }
 
+        /// <summary>
+        /// Fija la velocidad tras un impulso y bloquea la tracción un instante
+        /// para que el siguiente FixedUpdate no la borre.
+        /// </summary>
+        public void ApplyImpactVelocity(Vector3 velocity, float lockSeconds)
+        {
+            if (rb == null) return;
+            rb.linearVelocity = velocity;
+            currentForwardSpeed = Vector3.Dot(velocity, transform.forward);
+            impactLockTimer = Mathf.Max(impactLockTimer, lockSeconds);
+        }
+
         // Empujar o demoler obstáculos con masa al chocar a gran velocidad
         private void OnCollisionEnter(Collision collision)
         {
             if (treeImpact != null)
             {
-                treeImpact.HandleCollision(collision);
+                treeImpact.HandleCollision(collision, true);
             }
 
             Rigidbody otherRb = collision.rigidbody;
@@ -367,6 +396,14 @@ namespace DinoVehicle
                         DinoFollowCamera.Instance.TriggerShake(0.25f, 0.15f);
                     }
                 }
+            }
+        }
+
+        private void OnCollisionStay(Collision collision)
+        {
+            if (treeImpact != null)
+            {
+                treeImpact.HandleCollision(collision, false);
             }
         }
     }
