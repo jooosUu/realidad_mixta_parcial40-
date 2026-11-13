@@ -30,8 +30,38 @@ namespace DinoVehicle.Editor
         [InitializeOnLoadMethod]
         static void AutoRepararTerrenos()
         {
-            EditorSceneManager.sceneOpened += (escena, modo) => RepararTerrenosSinMaterial();
-            EditorApplication.delayCall += RepararTerrenosSinMaterial;
+            EditorSceneManager.sceneOpened += (escena, modo) => { RepararTerrenosSinMaterial(); AjustarTamanoTerreno(); };
+            EditorApplication.delayCall += () => { RepararTerrenosSinMaterial(); AjustarTamanoTerreno(); };
+        }
+
+        /// <summary>
+        /// Aplica TamTerreno al terreno ya existente sin reconstruir la escena: regenera alturas y
+        /// texturas del TerrainData y recentra el objeto. No toca árboles, fauna ni obstáculos.
+        /// </summary>
+        [MenuItem("DINO WEST/Ajustar Tamaño del Terreno")]
+        static void AjustarTamanoTerreno()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
+            var datos = AssetDatabase.LoadAssetAtPath<TerrainData>(RutaDatosTerreno);
+            if (datos == null) return;
+
+            if (Mathf.Abs(datos.size.x - TamTerreno) > 0.5f || Mathf.Abs(datos.size.z - TamTerreno) > 0.5f)
+            {
+                PrepararDatosTerreno();
+                Debug.Log($"<color=green>[DinoRealisticEnvironmentSetup]</color> Terreno regenerado a {TamTerreno:0} x {TamTerreno:0} m.");
+            }
+
+            var posicion = new Vector3(-TamTerreno * 0.5f, 0f, -TamTerreno * 0.5f);
+            foreach (var t in Object.FindObjectsByType<Terrain>(FindObjectsInactive.Include))
+            {
+                if (t.terrainData != datos || t.transform.position == posicion) continue;
+
+                Undo.RecordObject(t.transform, "Recentrar terreno");
+                t.transform.position = posicion;
+                EditorSceneManager.MarkSceneDirty(t.gameObject.scene);
+                Debug.Log($"<color=green>[DinoRealisticEnvironmentSetup]</color> Terreno '{t.name}' recentrado. Guarda la escena (Ctrl+S).");
+            }
         }
 
         static Material MaterialTerrenoEstandar()
@@ -179,7 +209,31 @@ namespace DinoVehicle.Editor
         // -------------------------------------------------------------
         // 2. CREACIÓN DEL TERRENO REALISTA PBR CON UNITY TERRAIN
         // -------------------------------------------------------------
+        /// <summary>Lado del terreno en metros. La pista ocupa x ±45 y z de -120 a 220.</summary>
+        const float TamTerreno = 700f;
+        const string RutaDatosTerreno = "Assets/Dino/Terrains/DinoWest_TerrainData.asset";
+
         static GameObject CrearTerrenoRealista()
+        {
+            TerrainData tData = PrepararDatosTerreno();
+
+            // Instanciar GameObject del Terreno
+            var terrainGo = Terrain.CreateTerrainGameObject(tData);
+            terrainGo.name = "Terreno_Realista_PBR";
+            terrainGo.transform.position = new Vector3(-TamTerreno * 0.5f, 0f, -TamTerreno * 0.5f);
+
+            var terrainComp = terrainGo.GetComponent<Terrain>();
+            // Sin material el terreno se pinta morado: hay que asignar el estándar del pipeline Built-in.
+            terrainComp.materialTemplate = MaterialTerrenoEstandar();
+            terrainComp.drawTreesAndFoliage = true;
+            terrainComp.treeDistance = 1500f;
+            terrainComp.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            terrainComp.heightmapPixelError = 3;
+
+            return terrainGo;
+        }
+
+        static TerrainData PrepararDatosTerreno()
         {
             string dirPath = "Assets/Dino/Terrains";
             if (!Directory.Exists(dirPath))
@@ -188,20 +242,20 @@ namespace DinoVehicle.Editor
                 AssetDatabase.Refresh();
             }
 
-            string dataPath = $"{dirPath}/DinoWest_TerrainData.asset";
+            string dataPath = RutaDatosTerreno;
             TerrainData tData = AssetDatabase.LoadAssetAtPath<TerrainData>(dataPath);
 
             if (tData == null)
             {
                 tData = new TerrainData();
                 tData.heightmapResolution = 513;
-                tData.size = new Vector3(1000f, 65f, 1000f);
+                tData.size = new Vector3(TamTerreno, 65f, TamTerreno);
                 AssetDatabase.CreateAsset(tData, dataPath);
             }
             else
             {
                 tData.heightmapResolution = 513;
-                tData.size = new Vector3(1000f, 65f, 1000f);
+                tData.size = new Vector3(TamTerreno, 65f, TamTerreno);
             }
 
             // Asignar las capas PBR descargadas
@@ -228,12 +282,12 @@ namespace DinoVehicle.Editor
             for (int z = 0; z < res; z++)
             {
                 float normZ = (float)z / (res - 1);
-                float worldZ = (normZ - 0.5f) * 1000f;
+                float worldZ = (normZ - 0.5f) * TamTerreno;
 
                 for (int x = 0; x < res; x++)
                 {
                     float normX = (float)x / (res - 1);
-                    float worldX = (normX - 0.5f) * 1000f;
+                    float worldX = (normX - 0.5f) * TamTerreno;
 
                     // Corredor central de la pista (x entre -60 y +60, z entre -120 y +220)
                     float distTrackX = Mathf.Abs(worldX);
@@ -275,12 +329,12 @@ namespace DinoVehicle.Editor
             for (int z = 0; z < alphaRes; z++)
             {
                 float normZ = (float)z / (alphaRes - 1);
-                float worldZ = (normZ - 0.5f) * 1000f;
+                float worldZ = (normZ - 0.5f) * TamTerreno;
 
                 for (int x = 0; x < alphaRes; x++)
                 {
                     float normX = (float)x / (alphaRes - 1);
-                    float worldX = (normX - 0.5f) * 1000f;
+                    float worldX = (normX - 0.5f) * TamTerreno;
 
                     float distEje = Mathf.Abs(worldX);
 
@@ -320,21 +374,7 @@ namespace DinoVehicle.Editor
 
             tData.SetAlphamaps(0, 0, alphamaps);
             AssetDatabase.SaveAssets();
-
-            // Instanciar GameObject del Terreno
-            var terrainGo = Terrain.CreateTerrainGameObject(tData);
-            terrainGo.name = "Terreno_Realista_PBR";
-            terrainGo.transform.position = new Vector3(-500f, 0f, -500f);
-
-            var terrainComp = terrainGo.GetComponent<Terrain>();
-            // Sin material el terreno se pinta morado: hay que asignar el estándar del pipeline Built-in.
-            terrainComp.materialTemplate = MaterialTerrenoEstandar();
-            terrainComp.drawTreesAndFoliage = true;
-            terrainComp.treeDistance = 1500f;
-            terrainComp.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
-            terrainComp.heightmapPixelError = 3;
-
-            return terrainGo;
+            return tData;
         }
 
         // -------------------------------------------------------------

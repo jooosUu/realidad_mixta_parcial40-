@@ -21,7 +21,7 @@ namespace DinoVehicle
         [SerializeField] float reactionLock = 0.28f;
         [Tooltip("Fuerza media a partir de la cual tiembla la cámara")]
         [SerializeField] float shakeForce = 4000f;
-        [Tooltip("Qué parte del ancho visible del árbol queda sólida")]
+        [Tooltip("Multiplicador del grosor del tronco sólido (0.72 = grosor estimado normal)")]
         [SerializeField] [Range(0.2f, 1f)] float solidWidth = 0.72f;
 
         // Nombres que identifican un árbol además de treeNameToken
@@ -274,10 +274,16 @@ namespace DinoVehicle
             float ez = Mathf.Max(0.0001f, Mathf.Abs(escala.z));
 
             float baseY = Mathf.Min(center.y - size.y * 0.5f, 0f);
-            size.x = Mathf.Clamp(size.x * solidWidth * ex, 2.4f, 6f) / ex;
-            size.z = Mathf.Clamp(size.z * solidWidth * ez, 2.4f, 6f) / ez;
-            size.y = Mathf.Clamp(size.y * ey, 3f, 8f) / ey;
-            center.y = baseY + size.y * 0.5f;
+
+            // El sólido va en el tronco, que nace en el pivote del árbol. Centrarlo en la malla
+            // lo ponía bajo la copa, que en árboles grandes está desplazada varios metros del tronco
+            // (se atravesaban). El grosor se estima por la altura: de 1.2 m a 3.5 m.
+            float alturaMundo = size.y * ey;
+            float grosor = Mathf.Clamp(alturaMundo * 0.11f * solidWidth, 1.2f, 3.5f);
+            size.x = grosor / ex;
+            size.z = grosor / ez;
+            size.y = Mathf.Clamp(alturaMundo, 3f, 8f) / ey;
+            center = new Vector3(0f, baseY + size.y * 0.5f, 0f);
 
             Collider[] oldColliders = tree.GetComponentsInChildren<Collider>();
             for (int i = 0; i < oldColliders.Length; i++)
