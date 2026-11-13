@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Dino/Scenes/Simulation.unity
+    guid: 2542a98000f64a34b8a2974b73ab94a4
+  - enabled: 1
     path: Assets/Dino/Scenes/DinoTestTrack.unity
     guid: ce8e5fa7645cd98459d58fbf7e5bacd0
   m_configObjects: {}

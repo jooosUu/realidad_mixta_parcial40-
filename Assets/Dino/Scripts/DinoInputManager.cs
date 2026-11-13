@@ -25,7 +25,8 @@ namespace DinoVehicle
         [Header("Valores de Control (Lectura)")]
         [Range(-1f, 1f)] public float steering = 0f;    // -1: Izquierda máxima, +1: Derecha máxima
         [Range(-1f, 1f)] public float throttle = 0f;    // -1: Reversa, 0: Parado, +1: Aceleración máxima
-        public bool isBraking = false;                  // Freno
+        public bool isBraking = false;
+        public bool isSprinting = false;                // Correr / Sprint (Shift)                  // Freno
         public bool jumpTriggered = false;              // Salto / Pisotón
         public bool roarTriggered = false;              // Rugido / Turbo
 
@@ -74,11 +75,19 @@ namespace DinoVehicle
             if (activeSource == InputSource.KeyboardMouse || activeSource == InputSource.BothCombined)
             {
                 kbSteer = Input.GetAxis("Horizontal"); // A/D o Flechas
-                kbThrottle = Input.GetAxis("Vertical");   // W/S o Flechas
+                float rawVertical = Input.GetAxis("Vertical"); // W/S o Flechas
 
-                if (Input.GetKey(keyTurbo) && kbThrottle > 0.1f)
+                isSprinting = Input.GetKey(keyTurbo);
+
+                if (rawVertical > 0.05f)
                 {
-                    kbThrottle = 1.35f; // Turbo boost con Shift
+                    // W solo: paso firme y caminata (~14-18 km/h)
+                    // W + Shift: carrera a fondo (~58-65 km/h)
+                    kbThrottle = isSprinting ? rawVertical : (rawVertical * 0.45f);
+                }
+                else
+                {
+                    kbThrottle = rawVertical;
                 }
 
                 kbBrake = Input.GetKey(keyBrake);

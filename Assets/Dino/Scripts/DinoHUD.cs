@@ -4,6 +4,9 @@ namespace DinoVehicle
 {
     public class DinoHUD : MonoBehaviour
     {
+        /// <summary>Si es false, no se dibujan las cajas de OnGUI (lo apaga DinoHUDView).</summary>
+        public static bool UsarHUDClasico = true;
+
         public DinoVehicleController vehicle;
         public DinoInputManager input;
         public ArduinoSerialConnector arduino;
@@ -64,6 +67,7 @@ namespace DinoVehicle
 
         private void OnGUI()
         {
+            if (!UsarHUDClasico) return;   // el HUD nuevo (DinoHUDView) lo reemplaza
             InitStyles();
 
             // Panel superior izquierdo: Velocímetro y Estado

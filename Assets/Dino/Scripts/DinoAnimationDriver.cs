@@ -21,13 +21,12 @@ namespace DinoVehicle
         private int hashIsGrounded;
         private int hashRoar;
         private int hashAttack;
-        private int hashWalk;
-        private int hashIdle;
 
         private bool hasSpeedParam = false;
         private bool hasRoarTrigger = false;
         private bool hasAttackTrigger = false;
         private bool lastRoaringState = false;
+        private string estadoSolicitado;
 
         private void Awake()
         {
@@ -42,16 +41,24 @@ namespace DinoVehicle
             hashIsGrounded = Animator.StringToHash("IsGrounded");
             hashRoar = Animator.StringToHash("Roar");
             hashAttack = Animator.StringToHash("Attack");
-            hashWalk = Animator.StringToHash("Walk");
-            hashIdle = Animator.StringToHash("Idle");
         }
 
         private void Start()
+        {
+            RefrescarParametros();
+        }
+
+        public void RefrescarParametros()
         {
             if (animator == null)
             {
                 animator = GetComponentInChildren<Animator>();
             }
+
+            hasSpeedParam = false;
+            hasRoarTrigger = false;
+            hasAttackTrigger = false;
+            estadoSolicitado = null;
 
             if (animator != null && animator.runtimeAnimatorController != null)
             {
@@ -70,6 +77,7 @@ namespace DinoVehicle
             {
                 animator = GetComponentInChildren<Animator>();
                 if (animator == null) return;
+                RefrescarParametros();
             }
 
             float speedKmh = controller.CurrentSpeedKmh;
@@ -94,32 +102,72 @@ namespace DinoVehicle
                 {
                     if (hasRoarTrigger) animator.SetTrigger(hashRoar);
                     else if (hasAttackTrigger) animator.SetTrigger(hashAttack);
-                    else animator.CrossFade("Roar", 0.1f);
+                    else CrossFadeSmart("Roar", 0.1f);
                 }
                 else if (!controller.IsRoaring)
                 {
-                    if (absSpeed > 1.2f)
+                    if (absSpeed > 0.8f)
                     {
-                        if (absSpeed > 22f)
+                        if (absSpeed > 18f)
                         {
-                            animator.CrossFade("Run", 0.15f);
-                            animator.speed = Mathf.Clamp(absSpeed * animSpeedMultiplier * 0.7f, 0.8f, 2.0f);
+                            CrossFadeSmart("Run", 0.18f);
+                            animator.speed = Mathf.Clamp((absSpeed - 18f) * 0.045f + 1.0f, 0.9f, 2.2f);
                         }
                         else
                         {
-                            animator.CrossFade("Walk", 0.15f);
-                            animator.speed = Mathf.Clamp(absSpeed * animSpeedMultiplier, minAnimSpeed, maxAnimSpeed);
+                            CrossFadeSmart("Walk", 0.15f);
+                            animator.speed = Mathf.Clamp(absSpeed * 0.085f + 0.35f, 0.65f, 1.4f);
                         }
                     }
                     else
                     {
-                        animator.CrossFade("Idle", 0.25f);
+                        CrossFadeSmart("Idle", 0.25f);
                         animator.speed = 1.0f;
                     }
                 }
             }
 
             lastRoaringState = controller.IsRoaring;
+        }
+
+        void CrossFadeSmart(string stateName, float transitionDuration)
+        {
+            if (animator == null || !animator.isActiveAndEnabled || animator.runtimeAnimatorController == null) return;
+
+            // Repetir CrossFade al mismo estado cada frame reinicia la transición
+            // y deja la animación congelada en su primer fotograma.
+            if (stateName == estadoSolicitado) return;
+            estadoSolicitado = stateName;
+
+            if (animator.HasState(0, Animator.StringToHash(stateName)))
+            {
+                animator.CrossFade(stateName, transitionDuration);
+                return;
+            }
+
+            // Variantes por modelo
+            if (stateName == "Idle")
+            {
+                if (animator.HasState(0, Animator.StringToHash("IdleA"))) animator.CrossFade("IdleA", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("RaptorArmature|Raptor_Idle1_Anim"))) animator.CrossFade("RaptorArmature|Raptor_Idle1_Anim", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("Armature|Pachycephalasaurus_IdleA"))) animator.CrossFade("Armature|Pachycephalasaurus_IdleA", transitionDuration);
+            }
+            else if (stateName == "Walk")
+            {
+                if (animator.HasState(0, Animator.StringToHash("RaptorArmature|Raptor_Walk_Anim"))) animator.CrossFade("RaptorArmature|Raptor_Walk_Anim", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("Armature|Pachycephalasaurus_Walk"))) animator.CrossFade("Armature|Pachycephalasaurus_Walk", transitionDuration);
+            }
+            else if (stateName == "Run")
+            {
+                if (animator.HasState(0, Animator.StringToHash("RaptorArmature|Raptor_Run1_Anim"))) animator.CrossFade("RaptorArmature|Raptor_Run1_Anim", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("Armature|Pachycephalasaurus_Run"))) animator.CrossFade("Armature|Pachycephalasaurus_Run", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("Armature|Pachycephalasaurus_HeadbuttCharged"))) animator.CrossFade("Armature|Pachycephalasaurus_HeadbuttCharged", transitionDuration);
+            }
+            else if (stateName == "Roar")
+            {
+                if (animator.HasState(0, Animator.StringToHash("RaptorArmature|Raptor_Roar1_Anim"))) animator.CrossFade("RaptorArmature|Raptor_Roar1_Anim", transitionDuration);
+                else if (animator.HasState(0, Animator.StringToHash("Armature|Pachycephalasaurus_HeadbuttCharged"))) animator.CrossFade("Armature|Pachycephalasaurus_HeadbuttCharged", transitionDuration);
+            }
         }
     }
 }

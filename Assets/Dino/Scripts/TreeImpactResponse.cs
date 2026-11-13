@@ -70,8 +70,65 @@ namespace DinoVehicle
 
             // Reacción sobre el dinosaurio: se anula la componente que entra, no se invierte.
             Vector3 reactionImpulse = -mass * normalSpeed * normal;
-            Vector3 newVelocity = velocity - normalSpeed * normal;
 
+            float speedKmh = vehicle != null ? vehicle.CurrentSpeedKmh : (velocity.magnitude * 3.6f);
+            bool isHighSpeed = speedKmh >= 32f || (vehicle != null && vehicle.IsBoosting);
+            bool isMediumSpeed = speedKmh >= 15f;
+
+            TreeReaction tree = collision.collider.GetComponentInParent<TreeReaction>();
+            Vector3 travel = Vector3.ProjectOnPlane(velocity, Vector3.up);
+            Vector3 push = travel.sqrMagnitude > 0.25f
+                ? travel
+                : Vector3.ProjectOnPlane(-normal, Vector3.up);
+
+            // 1. Velocidad muy baja (< 15 km/h): solo mece suavemente sin derribar
+            if (!isMediumSpeed && !isHighSpeed)
+            {
+                Vector3 slowVelocity = velocity - normalSpeed * normal;
+                if (vehicle != null) vehicle.ApplyImpactVelocity(slowVelocity, 0.08f);
+                else body.linearVelocity = slowVelocity;
+
+                if (tree != null && push.sqrMagnitude > 0.0001f)
+                {
+                    push.Normalize();
+                    tree.ReceivePush(push, -normalSpeed);
+                }
+                return;
+            }
+
+            // 2. Velocidad muy alta (>= 32 km/h o turbo):
+            // Cae de UNA y el dinosaurio conserva el 72% de inercia (arrolla el árbol)
+            if (isHighSpeed)
+            {
+                if (tree != null && push.sqrMagnitude > 0.0001f)
+                {
+                    push.Normalize();
+                    tree.ReceiveImpulse(push, reactionImpulse.magnitude, true);
+                }
+
+                Vector3 plowVelocity = velocity * 0.72f;
+                if (vehicle != null)
+                {
+                    vehicle.ApplyImpactVelocity(plowVelocity, 0.05f);
+                }
+                else
+                {
+                    body.linearVelocity = plowVelocity;
+                }
+
+                LastImpulse = reactionImpulse.magnitude;
+                LastImpactForce = LastImpulse / Mathf.Max(0.01f, impactDuration);
+
+                if (DinoFollowCamera.Instance != null)
+                {
+                    DinoFollowCamera.Instance.TriggerShake(0.35f, 0.12f);
+                }
+                return;
+            }
+
+            // 3. Velocidad media (15 a 32 km/h):
+            // Se flexiona y requiere 2 o 3 impactos para caer
+            Vector3 newVelocity = velocity - normalSpeed * normal;
             if (vehicle != null)
             {
                 vehicle.ApplyImpactVelocity(newVelocity, firstContact ? reactionLock : 0.08f);
@@ -81,17 +138,12 @@ namespace DinoVehicle
                 body.linearVelocity = newVelocity;
             }
 
-            TreeReaction tree = collision.collider.GetComponentInParent<TreeReaction>();
-            Vector3 travel = Vector3.ProjectOnPlane(velocity, Vector3.up);
-            Vector3 push = travel.sqrMagnitude > 0.25f
-                ? travel
-                : Vector3.ProjectOnPlane(-normal, Vector3.up);
             if (tree != null && push.sqrMagnitude > 0.0001f)
             {
                 push.Normalize();
                 if (firstContact)
                 {
-                    tree.ReceiveImpulse(push, reactionImpulse.magnitude);
+                    tree.ReceiveImpulse(push, reactionImpulse.magnitude, false);
                 }
                 else
                 {
@@ -112,6 +164,7 @@ namespace DinoVehicle
                 DinoFollowCamera.Instance.TriggerShake(0.22f, 0.08f);
             }
         }
+
 
         void SolidifyTrees()
         {
@@ -345,7 +398,7 @@ namespace DinoVehicle
         /// <summary>
         /// Impulso de la acción, en la dirección en que empuja el dinosaurio.
         /// </summary>
-        public void ReceiveImpulse(Vector3 pushDirection, float impulse)
+        public void ReceiveImpulse(Vector3 pushDirection, float impulse, bool isHighSpeed = false)
         {
             if (falling || fallen || parts == null || pushDirection.sqrMagnitude < 0.0001f)
             {
@@ -357,7 +410,14 @@ namespace DinoVehicle
                 return;
             }
             bendSpeed += impulse * impulseGain;
-            RegisterHit();
+            if (isHighSpeed)
+            {
+                BeginFall();
+            }
+            else
+            {
+                RegisterHit();
+            }
         }
 
         /// <summary>

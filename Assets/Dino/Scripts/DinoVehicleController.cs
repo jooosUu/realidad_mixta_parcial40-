@@ -13,7 +13,7 @@ namespace DinoVehicle
         [Tooltip("Velocidad de retroceso")]
         public float maxReverseSpeed = 5f;
         [Tooltip("Fuerza de aceleración")]
-        public float acceleration = 25f;
+        public float acceleration = 12f; // Inercia animal progresiva para permitir transicion de caminata
         [Tooltip("Fuerza de frenado")]
         public float brakeStrength = 35f;
 
