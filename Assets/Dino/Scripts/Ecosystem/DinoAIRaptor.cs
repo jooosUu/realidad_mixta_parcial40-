@@ -16,6 +16,8 @@ namespace DinoVehicle
         [SerializeField] float stalkSpeed = 3.2f;
         [SerializeField] float sprintSpeed = 12.0f;
         [SerializeField] float alertDistance = 18f;
+        [Tooltip("El modelo PBR del Velociraptor viene mirando hacia -Z; activo = avanza hacia donde mira la cabeza")]
+        [SerializeField] bool frenteInvertido = true;
 
         Vector3 originPos;
         Vector3 targetPos;
@@ -29,6 +31,17 @@ namespace DinoVehicle
             originPos = transform.position;
             animator = GetComponentInChildren<Animator>();
             player = FindAnyObjectByType<DinoVehicleController>();
+
+#if UNITY_EDITOR
+            // El prefab del raptor no trae AnimatorController; sin uno queda en pose fija.
+            if (animator != null && animator.runtimeAnimatorController == null)
+            {
+                var ctrl = DinoMountManager.CargarControllerValido(
+                    DinoMountManager.CtrlVelociraptor,
+                    "Assets/PBRVelociraptor/Animators/DemoAnimatorWalk.controller");
+                if (ctrl != null) animator.runtimeAnimatorController = ctrl;
+            }
+#endif
 
             ElegirPuntoAcecho();
         }
@@ -95,9 +108,10 @@ namespace DinoVehicle
             dir.y = 0;
             if (dir.sqrMagnitude > 0.05f)
             {
-                Quaternion rot = Quaternion.LookRotation(dir);
+                float signo = frenteInvertido ? -1f : 1f;
+                Quaternion rot = Quaternion.LookRotation(dir * signo);
                 transform.rotation = Quaternion.Slerp(transform.rotation, rot, Time.deltaTime * 6f);
-                transform.position += transform.forward * speed * Time.deltaTime;
+                transform.position += transform.forward * (signo * speed * Time.deltaTime);
             }
         }
 

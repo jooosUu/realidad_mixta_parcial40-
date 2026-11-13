@@ -24,17 +24,38 @@ namespace DinoVehicle.Editor
             "Assets/Dino/Scenes/DinoTestTrack.unity"
         };
 
+        // La reconstrucción completa ya NO se lanza sola al abrir el editor: borraba y regeneraba
+        // las dos escenas en cada sesión, pisando cualquier cambio hecho a mano. Queda en el menú.
+        // Lo único automático es reparar terrenos sin material (se ven morados), que no destruye nada.
         [InitializeOnLoadMethod]
-        static void AutoRunOnCompile()
+        static void AutoRepararTerrenos()
         {
-            EditorApplication.delayCall += () =>
+            EditorSceneManager.sceneOpened += (escena, modo) => RepararTerrenosSinMaterial();
+            EditorApplication.delayCall += RepararTerrenosSinMaterial;
+        }
+
+        static Material MaterialTerrenoEstandar()
+        {
+            return AssetDatabase.GetBuiltinExtraResource<Material>("Default-Terrain-Standard.mat");
+        }
+
+        [MenuItem("DINO WEST/Reparar Terreno Morado")]
+        static void RepararTerrenosSinMaterial()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
+            var mat = MaterialTerrenoEstandar();
+            if (mat == null) return;
+
+            foreach (var t in Object.FindObjectsByType<Terrain>(FindObjectsInactive.Include))
             {
-                if (!SessionState.GetBool("DinoRealisticEnv_Done_v2", false))
-                {
-                    SessionState.SetBool("DinoRealisticEnv_Done_v2", true);
-                    EjecutarReemplazoCompleto();
-                }
-            };
+                if (t.materialTemplate != null && t.materialTemplate.shader != null && t.materialTemplate.shader.isSupported) continue;
+
+                t.materialTemplate = mat;
+                EditorUtility.SetDirty(t);
+                EditorSceneManager.MarkSceneDirty(t.gameObject.scene);
+                Debug.Log($"<color=green>[DinoRealisticEnvironmentSetup]</color> Material estándar asignado al terreno '{t.name}'. Guarda la escena (Ctrl+S).");
+            }
         }
 
         [MenuItem("DINO WEST/Construir Terreno y Ecosistema Realista (Cero Poligonos)")]
@@ -306,7 +327,8 @@ namespace DinoVehicle.Editor
             terrainGo.transform.position = new Vector3(-500f, 0f, -500f);
 
             var terrainComp = terrainGo.GetComponent<Terrain>();
-            terrainComp.materialTemplate = null; // Shader estándar BIRP integrado
+            // Sin material el terreno se pinta morado: hay que asignar el estándar del pipeline Built-in.
+            terrainComp.materialTemplate = MaterialTerrenoEstandar();
             terrainComp.drawTreesAndFoliage = true;
             terrainComp.treeDistance = 1500f;
             terrainComp.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;

@@ -25,10 +25,13 @@ namespace DinoVehicle
             public float TurnSpeed;
             public float JumpImpulse;
             public float VisualScale;
+            /// <summary>Giro en Y (grados) para modelos cuyo frente no es +Z.</summary>
+            public float VisualYaw;
             public string Descripcion;
 
-            public MountDef(string nom, bool disp, string path, float speed, float turbo, float mass, float turn, float jump, float scale, string desc)
+            public MountDef(string nom, bool disp, string path, float speed, float turbo, float mass, float turn, float jump, float scale, string desc, float yaw = 0f)
             {
+                VisualYaw = yaw;
                 Nombre = nom;
                 Disponible = disp;
                 PrefabPath = path;
@@ -66,7 +69,8 @@ namespace DinoVehicle
                 135f,
                 15f,
                 1.55f,
-                "Montura ligera ultra veloz. Aceleración explosiva, virajes cerrados y saltos acrobáticos."
+                "Montura ligera ultra veloz. Aceleración explosiva, virajes cerrados y saltos acrobáticos.",
+                180f // El modelo del Velociraptor viene mirando hacia -Z
             ),
             new MountDef(
                 "Paquicefalo",
@@ -213,7 +217,7 @@ namespace DinoVehicle
             {
                 var nuevoVisual = UnityEngine.Object.Instantiate(prefab, dynamicMount);
                 nuevoVisual.transform.localPosition = Vector3.zero;
-                nuevoVisual.transform.localRotation = Quaternion.identity;
+                nuevoVisual.transform.localRotation = Quaternion.Euler(0f, def.VisualYaw, 0f);
                 nuevoVisual.transform.localScale = Vector3.one * def.VisualScale;
                 nuevoVisual.name = $"Visual_{def.Nombre}";
 

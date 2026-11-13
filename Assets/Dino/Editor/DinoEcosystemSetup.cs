@@ -23,18 +23,8 @@ namespace DinoVehicle
             "Assets/Dino/Scenes/DinoTestTrack.unity"
         };
 
-        [InitializeOnLoadMethod]
-        static void AutoRunOnCompile()
-        {
-            EditorApplication.delayCall += () =>
-            {
-                if (!SessionState.GetBool("DinoEcosystemSetup_Done_v1", false))
-                {
-                    SessionState.SetBool("DinoEcosystemSetup_Done_v1", true);
-                    ConstruirEcosistema();
-                }
-            };
-        }
+        // Ya no se ejecuta solo al abrir el editor: regeneraba las dos escenas en cada sesión
+        // y competía con DinoRealisticEnvironmentSetup por el mismo "Ecosistema_DinoWest".
 
         [MenuItem("DINO WEST/Construir Ecosistema Completo (Árboles, Dinos, Flores, Pelota)")]
         public static void ConstruirEcosistema()
