@@ -13,7 +13,7 @@ namespace DinoVehicle
         [Tooltip("Velocidad de retroceso")]
         public float maxReverseSpeed = 5f;
         [Tooltip("Fuerza de aceleración")]
-        public float acceleration = 25f;
+        public float acceleration = 12f; // Inercia animal progresiva para permitir transicion de caminata
         [Tooltip("Fuerza de frenado")]
         public float brakeStrength = 35f;
 
@@ -44,6 +44,7 @@ namespace DinoVehicle
 
         // Estados y telemetría
         public float CurrentSpeedKmh => currentForwardSpeed * 3.6f;
+        public Vector3 PlanarVelocity => transform.forward * currentForwardSpeed;
         public float SpeedRatio => Mathf.Abs(currentForwardSpeed) / (maxForwardSpeed * boostMultiplier);
         public bool IsGrounded { get; private set; } = true;
         public bool IsBoosting { get; private set; } = false;
@@ -52,17 +53,27 @@ namespace DinoVehicle
         private Rigidbody rb;
         private CapsuleCollider col;
         private DinoInputManager input;
+        private TreeImpactResponse treeImpact;
 
         private float currentForwardSpeed = 0f;
         private float currentBank = 0f;
         private float boostTimer = 0f;
         private float boostCooldownTimer = 0f;
         private Vector3 groundNormal = Vector3.up;
+        private bool placedOnGround = false;
+        private Vector3 spawnPosition;
+        private Quaternion spawnRotation;
+        private float impactLockTimer = 0f;
 
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
             col = GetComponent<CapsuleCollider>();
+            treeImpact = GetComponent<TreeImpactResponse>();
+            if (treeImpact == null)
+            {
+                treeImpact = gameObject.AddComponent<TreeImpactResponse>();
+            }
 
             // Configurar física del Rigidbody para evitar vuelcos descontrolados
             rb.mass = 1200f; // 1.2 toneladas de dinosaurio
@@ -70,6 +81,10 @@ namespace DinoVehicle
             rb.angularDamping = 3f;
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            col.providesContacts = true;
+            spawnPosition = transform.position;
+            spawnRotation = transform.rotation;
 
             if (audioSource == null)
             {
@@ -122,9 +137,80 @@ namespace DinoVehicle
 
         private void FixedUpdate()
         {
+            if (!placedOnGround)
+            {
+                PlaceOnGround();
+                placedOnGround = true;
+            }
+
             CheckGround();
             ApplyMovementPhysics();
             ApplyExtraGravity();
+        }
+
+        // El suelo del entorno es una malla que solo choca por arriba.
+        // Si el pivote queda debajo, el dinosaurio atraviesa y cae al vacío.
+        private void PlaceOnGround()
+        {
+            Vector3 origin = transform.position + Vector3.up * 80f;
+            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 200f, groundLayer, QueryTriggerInteraction.Ignore);
+            float feet = transform.position.y;
+            bool hasBelow = false;
+            bool hasAbove = false;
+            float belowDist = float.MaxValue;
+            float aboveDist = float.MaxValue;
+            float belowY = feet;
+            float aboveY = feet;
+
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider == null || hit.collider.attachedRigidbody == rb) continue;
+                if (hit.normal.y < 0.25f) continue;
+
+                float dy = feet - hit.point.y;
+                if (dy >= -0.05f)
+                {
+                    if (dy < belowDist)
+                    {
+                        belowDist = dy;
+                        belowY = hit.point.y;
+                        hasBelow = true;
+                    }
+                }
+                else
+                {
+                    float up = -dy;
+                    if (up < aboveDist)
+                    {
+                        aboveDist = up;
+                        aboveY = hit.point.y;
+                        hasAbove = true;
+                    }
+                }
+            }
+
+            float targetY;
+            if (hasBelow && belowDist <= 2.5f) targetY = belowY + 0.15f;
+            else if (hasAbove) targetY = aboveY + 0.15f;
+            else if (hasBelow) targetY = belowY + 0.15f;
+            else return;
+
+            Vector3 p = transform.position;
+            p.y = targetY;
+            rb.position = p;
+            transform.position = p;
+            rb.linearVelocity = Vector3.zero;
+        }
+
+        public void ResetToSpawn()
+        {
+            transform.SetPositionAndRotation(spawnPosition, spawnRotation);
+            rb.position = spawnPosition;
+            rb.rotation = spawnRotation;
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            PlaceOnGround();
+            placedOnGround = true;
         }
 
         private void CheckGround()
@@ -147,9 +233,23 @@ namespace DinoVehicle
         {
             if (input == null) return;
 
+            if (impactLockTimer > 0f)
+            {
+                impactLockTimer -= Time.fixedDeltaTime;
+            }
+
             // Calcular velocidad local hacia adelante
             Vector3 localVel = transform.InverseTransformDirection(rb.linearVelocity);
             currentForwardSpeed = localVel.z;
+
+            // Durante la reacción no se vuelve a acelerar contra el tronco.
+            if (impactLockTimer > 0f)
+            {
+                Vector3 held = transform.forward * currentForwardSpeed;
+                held.y = rb.linearVelocity.y;
+                rb.linearVelocity = held;
+                return;
+            }
 
             float throttle = input.throttle;
             float steer = input.steering;
@@ -252,9 +352,36 @@ namespace DinoVehicle
             visualModel.localRotation = Quaternion.Euler(0f, 0f, currentBank);
         }
 
+        /// <summary>
+        /// Sincroniza la velocidad de tracción después de un impulso externo,
+        /// para que el siguiente FixedUpdate no borre la reacción.
+        /// </summary>
+        public void NotifyExternalVelocityChange()
+        {
+            if (rb == null) return;
+            currentForwardSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
+        }
+
+        /// <summary>
+        /// Fija la velocidad tras un impulso y bloquea la tracción un instante
+        /// para que el siguiente FixedUpdate no la borre.
+        /// </summary>
+        public void ApplyImpactVelocity(Vector3 velocity, float lockSeconds)
+        {
+            if (rb == null) return;
+            rb.linearVelocity = velocity;
+            currentForwardSpeed = Vector3.Dot(velocity, transform.forward);
+            impactLockTimer = Mathf.Max(impactLockTimer, lockSeconds);
+        }
+
         // Empujar o demoler obstáculos con masa al chocar a gran velocidad
         private void OnCollisionEnter(Collision collision)
         {
+            if (treeImpact != null)
+            {
+                treeImpact.HandleCollision(collision, true);
+            }
+
             Rigidbody otherRb = collision.rigidbody;
             if (otherRb != null && !otherRb.isKinematic)
             {
@@ -269,6 +396,14 @@ namespace DinoVehicle
                         DinoFollowCamera.Instance.TriggerShake(0.25f, 0.15f);
                     }
                 }
+            }
+        }
+
+        private void OnCollisionStay(Collision collision)
+        {
+            if (treeImpact != null)
+            {
+                treeImpact.HandleCollision(collision, false);
             }
         }
     }

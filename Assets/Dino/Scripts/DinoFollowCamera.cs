@@ -11,11 +11,13 @@ namespace DinoVehicle
         public DinoVehicleController vehicle;
 
         [Header("Posición de Seguimiento")]
-        public float distance = 5.5f;
-        public float height = 2.4f;
-        public float lookAtHeight = 1.3f;
-        public float followSharpness = 6f;
-        public float rotationSharpness = 8f;
+        public float distance = 9f;
+        public float height = 3.4f;
+        public float lookAtHeight = 1.8f;
+        [Tooltip("Punto del cuerpo que queda en el centro de la pantalla")]
+        public Vector3 focusLocalOffset = new Vector3(0f, 1.8f, 1.1f);
+        public float followSharpness = 10f;
+        public float rotationSharpness = 14f;
 
         [Header("Cámara Dinámica de Velocidad")]
         public float baseFOV = 60f;
@@ -27,6 +29,7 @@ namespace DinoVehicle
         private Vector3 currentVelocity;
         private float shakeIntensity = 0f;
         private float shakeDuration = 0f;
+        private bool framed;
 
         private void Awake()
         {
@@ -52,17 +55,29 @@ namespace DinoVehicle
         {
             if (target == null) return;
 
-            // 1. Calcular posición ideal detrás del objetivo
             Vector3 forward = target.forward;
-            Vector3 targetPos = target.position - forward * distance + Vector3.up * height;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f) forward = Vector3.forward;
+            forward.Normalize();
 
-            // 2. Interpolar suavemente
-            transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * followSharpness);
+            Vector3 focus = target.TransformPoint(focusLocalOffset);
+            Vector3 targetPos = focus - forward * distance + Vector3.up * height;
+            if (!framed)
+            {
+                transform.position = targetPos;
+                framed = true;
+            }
+            else
+            {
+                float posT = 1f - Mathf.Exp(-followSharpness * Time.deltaTime);
+                transform.position = Vector3.Lerp(transform.position, targetPos, posT);
+            }
 
-            // 3. Mirar hacia el objetivo + altura de vista
-            Vector3 lookTarget = target.position + Vector3.up * lookAtHeight + target.forward * 1.5f;
-            Quaternion desiredRotation = Quaternion.LookRotation(lookTarget - transform.position);
-            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRotation, Time.deltaTime * rotationSharpness);
+            Vector3 lookDir = focus - transform.position;
+            if (lookDir.sqrMagnitude > 0.0001f)
+            {
+                transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+            }
 
             // 4. Efecto Shake (sacudida)
             if (shakeDuration > 0f)

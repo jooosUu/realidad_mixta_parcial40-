@@ -40,3 +40,13 @@ sysinfo.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Exclude files exceeding GitHub's 100MB limit and heavy sample scene cache from TerrainDemoScene_URP
+Assets/TerrainDemoScene_URP/Terrain/Textures/Cliff_Mossy_E/
+Assets/TerrainDemoScene_URP/Terrain/Data/
+Assets/TerrainDemoScene_URP/Scenes/TerrainDemoScene/
+Assets/TerrainDemoScene_URP/Terrain/Textures/Black_Sand_A/
+Assets/TerrainDemoScene_URP/Terrain/Textures/Black_Sand_Rocks_B/
+Assets/TerrainDemoScene_URP/Terrain/Textures/Tidal_Pools_B/
+Assets/TerrainDemoScene_URP/Prefabs/Water/
+Assets/TerrainDemoScene_URP/Prefabs/Skybox/Textures/Afternoon_Skybox.hdr
