@@ -379,7 +379,9 @@ namespace DinoVehicle
                 trunkLength = Mathf.Max(1.5f, box.size.y * Mathf.Abs(transform.lossyScale.y));
             }
 
-            int count = transform.childCount;
+            // Árbol de una sola pieza (sin hijos): la pieza que se flexiona es la propia raíz.
+            bool sinHijos = transform.childCount == 0;
+            int count = sinHijos ? 1 : transform.childCount;
             parts = new Transform[count];
             restOffsets = new Vector3[count];
             restRotations = new Quaternion[count];
@@ -387,7 +389,7 @@ namespace DinoVehicle
             restLocalRotations = new Quaternion[count];
             for (int i = 0; i < count; i++)
             {
-                parts[i] = transform.GetChild(i);
+                parts[i] = sinHijos ? transform : transform.GetChild(i);
                 restOffsets[i] = parts[i].position - pivot;
                 restRotations[i] = parts[i].rotation;
                 restLocalPositions[i] = parts[i].localPosition;
