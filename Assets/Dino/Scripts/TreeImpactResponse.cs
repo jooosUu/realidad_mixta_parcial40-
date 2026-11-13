@@ -24,8 +24,13 @@ namespace DinoVehicle
         [Tooltip("Qué parte del ancho visible del árbol queda sólida")]
         [SerializeField] [Range(0.2f, 1f)] float solidWidth = 0.72f;
 
+        // Nombres que identifican un árbol además de treeNameToken
+        // (las coníferas de la escena se llaman "PBR_Conifera_Este_N").
+        static readonly string[] TreeTokens = { "Tree", "Conifer", "Pine", "Arbol" };
+
         Rigidbody body;
         DinoVehicleController vehicle;
+        float nextLogTime;
 
         public float LastImpulse { get; private set; }
         public float LastImpactForce { get; private set; }
@@ -76,6 +81,18 @@ namespace DinoVehicle
             bool isMediumSpeed = speedKmh >= 15f;
 
             TreeReaction tree = collision.collider.GetComponentInParent<TreeReaction>();
+
+            if (firstContact && Time.time >= nextLogTime)
+            {
+                nextLogTime = Time.time + 0.3f;
+                string efecto = tree == null ? "SIN TreeReaction (no puede caer)"
+                    : tree.HasFallen ? "ya estaba caído"
+                    : isHighSpeed ? "cae de inmediato"
+                    : isMediumSpeed ? $"golpe {tree.HitCount + 1} de {tree.HitsToFall}"
+                    : "solo se mece (menos de 15 km/h)";
+                Debug.Log($"<color=orange>[TreeImpact]</color> Choque con '{collision.collider.transform.root.name}/{collision.collider.name}' a {speedKmh:0} km/h → {efecto}");
+            }
+
             Vector3 travel = Vector3.ProjectOnPlane(velocity, Vector3.up);
             Vector3 push = travel.sqrMagnitude > 0.25f
                 ? travel
@@ -183,25 +200,41 @@ namespace DinoVehicle
 
         static bool IsTreeRoot(Transform tree)
         {
-            string name = tree.name;
-            if (name.IndexOf("Tree", System.StringComparison.OrdinalIgnoreCase) < 0)
-            {
-                return false;
-            }
-            if (name.IndexOf("LOD", System.StringComparison.Ordinal) >= 0)
+            if (!IsTreeName(tree.name))
             {
                 return false;
             }
 
-            Transform parent = tree.parent;
-            if (parent != null &&
-                parent.name.IndexOf("Tree", System.StringComparison.OrdinalIgnoreCase) >= 0 &&
-                parent.name.IndexOf("LOD", System.StringComparison.Ordinal) < 0)
+            // Solo la raíz: si algún ancestro ya es un árbol, esta es una pieza suya.
+            for (Transform parent = tree.parent; parent != null; parent = parent.parent)
+            {
+                if (IsTreeName(parent.name))
+                {
+                    return false;
+                }
+            }
+
+            // Un contenedor vacío ("01_Arboleda_...") no es un árbol.
+            return tree.GetComponentInChildren<Renderer>() != null;
+        }
+
+        static bool IsTreeName(string name)
+        {
+            if (name.IndexOf("LOD", System.StringComparison.Ordinal) >= 0 ||
+                name.IndexOf("Arboleda", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Arboles", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return false;
             }
 
-            return true;
+            for (int i = 0; i < TreeTokens.Length; i++)
+            {
+                if (name.IndexOf(TreeTokens[i], System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         Vector3 ContactNormal(Collision collision)
@@ -232,14 +265,25 @@ namespace DinoVehicle
                 return;
             }
 
-            size.x = Mathf.Clamp(size.x * solidWidth, 2.4f, 6f);
-            size.y = Mathf.Clamp(size.y, 3f, 8f);
-            size.z = Mathf.Clamp(size.z * solidWidth, 2.4f, 6f);
+            // La caja se apoya en la base del árbol. Si solo se recorta la altura alrededor
+            // del centro, en un árbol alto queda flotando en la copa y el dinosaurio pasa por debajo.
+            // Los límites están en metros de mundo, así que se convierten a la escala del árbol.
+            Vector3 escala = tree.lossyScale;
+            float ex = Mathf.Max(0.0001f, Mathf.Abs(escala.x));
+            float ey = Mathf.Max(0.0001f, Mathf.Abs(escala.y));
+            float ez = Mathf.Max(0.0001f, Mathf.Abs(escala.z));
+
+            float baseY = Mathf.Min(center.y - size.y * 0.5f, 0f);
+            size.x = Mathf.Clamp(size.x * solidWidth * ex, 2.4f, 6f) / ex;
+            size.z = Mathf.Clamp(size.z * solidWidth * ez, 2.4f, 6f) / ez;
+            size.y = Mathf.Clamp(size.y * ey, 3f, 8f) / ey;
+            center.y = baseY + size.y * 0.5f;
 
             Collider[] oldColliders = tree.GetComponentsInChildren<Collider>();
             for (int i = 0; i < oldColliders.Length; i++)
             {
-                oldColliders[i].enabled = false;
+                // Los triggers (p. ej. la zona de comida de DinoFoodTree) se conservan.
+                if (!oldColliders[i].isTrigger) oldColliders[i].enabled = false;
             }
 
             BoxCollider solid = tree.gameObject.AddComponent<BoxCollider>();
@@ -311,10 +355,17 @@ namespace DinoVehicle
 
         bool IsTree(Collider collider)
         {
+            if (collider.GetComponentInParent<TreeReaction>() != null)
+            {
+                return true;
+            }
+
             Transform current = collider.transform;
             while (current != null)
             {
-                if (current.name.IndexOf(treeNameToken, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (IsTreeName(current.name) ||
+                    (!string.IsNullOrEmpty(treeNameToken) &&
+                     current.name.IndexOf(treeNameToken, System.StringComparison.OrdinalIgnoreCase) >= 0))
                 {
                     return true;
                 }
@@ -368,6 +419,8 @@ namespace DinoVehicle
         Quaternion restRootRotation;
 
         public bool HasFallen => fallen;
+        public int HitCount => hitCount;
+        public int HitsToFall => hitsToFall;
 
         void Start()
         {
@@ -492,7 +545,7 @@ namespace DinoVehicle
             Collider[] colliders = GetComponents<Collider>();
             for (int i = 0; i < colliders.Length; i++)
             {
-                colliders[i].enabled = false;
+                if (!colliders[i].isTrigger) colliders[i].enabled = false;
             }
 
             ApplyFallRotation();
@@ -526,7 +579,8 @@ namespace DinoVehicle
                     Collider[] colliders = GetComponents<Collider>();
                     for (int i = 0; i < colliders.Length; i++)
                     {
-                        colliders[i].enabled = true;
+                        // Solo el sólido creado al inicio; el collider original del prefab sigue apagado.
+                        if (colliders[i] is BoxCollider && !colliders[i].isTrigger) colliders[i].enabled = true;
                     }
                     return;
                 }
