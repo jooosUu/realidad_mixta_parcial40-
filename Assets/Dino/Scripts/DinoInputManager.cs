@@ -64,6 +64,15 @@ namespace DinoVehicle
         [NonSerialized] public Vector2 handCursor = new Vector2(0.5f, 0.5f);
         [NonSerialized] public bool handPinch = false;
 
+        // Entradas del mando de Switch / gamepad (actualizadas por DinoGamepadConnector)
+        [NonSerialized] public bool padConnected = false;
+        [NonSerialized] public float padSteering = 0f;
+        [NonSerialized] public float padThrottle = 0f;
+        [NonSerialized] public bool padSprint = false;
+        [NonSerialized] public bool padBrake = false;
+        [NonSerialized] public bool padJump = false;
+        [NonSerialized] public bool padRoar = false;
+
         private float targetSteering = 0f;
         private float targetThrottle = 0f;
 
@@ -160,6 +169,17 @@ namespace DinoVehicle
                 handJump = handRoar = false;
             }
 
+            // 4. Mando de Switch / gamepad: va con el teclado (KeyboardMouse) y en el modo combinado.
+            if ((activeSource == InputSource.KeyboardMouse || activeSource == InputSource.BothCombined) && padConnected)
+            {
+                if (Mathf.Abs(padSteering) > Mathf.Abs(kbSteer)) kbSteer = padSteering;
+                if (Mathf.Abs(padThrottle) > Mathf.Abs(kbThrottle)) { kbThrottle = padThrottle; sprint |= padSprint; }
+                kbBrake |= padBrake;
+                if (padJump) jumpTriggered = true;
+                if (padRoar) roarTriggered = true;
+            }
+            padJump = padRoar = false;
+
             targetSteering = Mathf.Clamp(kbSteer, -1f, 1f);
             targetThrottle = Mathf.Clamp(kbThrottle, -1f, 1.5f);
             isBraking = kbBrake;
@@ -172,6 +192,18 @@ namespace DinoVehicle
 
         /// <summary>La fuente con más intensidad manda; así ninguna pisa a otra que está quieta.</summary>
         static float MayorMagnitud(float a, float b) => Mathf.Abs(b) > Mathf.Abs(a) ? b : a;
+
+        public void SetGamepadInputs(bool connected, float steerVal, float throttleVal, bool sprintVal, bool brakeVal,
+            bool jumpBtn, bool roarBtn)
+        {
+            padConnected = connected;
+            padSteering = steerVal;
+            padThrottle = throttleVal;
+            padSprint = sprintVal;
+            padBrake = brakeVal;
+            if (jumpBtn) padJump = true;
+            if (roarBtn) padRoar = true;
+        }
 
         public void SetArduinoInputs(float steerVal, float throttleVal, bool jumpBtn, bool roarBtn)
         {

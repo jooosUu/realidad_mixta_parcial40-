@@ -203,6 +203,24 @@ def dist(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+_clahe = None
+
+
+def mejorar_contraluz(cv2, frame):
+    """Con una ventana detrás la imagen sale quemada y las manos oscuras: se levantan las sombras
+    (CLAHE sobre la luminancia) solo cuando la imagen es muy clara u oscura."""
+    global _clahe
+    brillo = float(frame.mean())
+    if 70 <= brillo <= 150:
+        return frame
+    if _clahe is None:
+        _clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    l = _clahe.apply(l)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+
+
 def tam_palma(lm):
     # Muñeca -> nudillo medio: referencia de escala independiente de la distancia a la cámara.
     return max(dist(lm[0], lm[9]), 1e-4)
@@ -243,7 +261,7 @@ class DetectorManos:
         if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
             self.hands = mp.solutions.hands.Hands(
                 static_image_mode=False, max_num_hands=2, model_complexity=0,
-                min_detection_confidence=0.6, min_tracking_confidence=0.5)
+                min_detection_confidence=0.4, min_tracking_confidence=0.4)
             self.modo = "solutions"
         else:
             from mediapipe.tasks import python as mp_python
@@ -256,9 +274,9 @@ class DetectorManos:
                 base_options=mp_python.BaseOptions(model_asset_path=MODELO_RUTA),
                 running_mode=vision.RunningMode.VIDEO,
                 num_hands=2,
-                min_hand_detection_confidence=0.6,
-                min_hand_presence_confidence=0.5,
-                min_tracking_confidence=0.5)
+                min_hand_detection_confidence=0.4,
+                min_hand_presence_confidence=0.4,
+                min_tracking_confidence=0.4)
             self.landmarker = vision.HandLandmarker.create_from_options(opciones)
             self.modo = "tasks"
             self.t0 = time.monotonic()
@@ -445,6 +463,11 @@ def dibujar(cv2, frame, manos, gestos, paquete, fps):
                    (0, 0, 255) if paquete["pinch"] else (0, 255, 0), 2)
 
     ok = paquete["hands"] > 0
+    if not ok:
+        cv2.putText(frame, "LEVANTA LAS MANOS FRENTE A LA CAMARA", (int(w * 0.06), int(h * 0.92)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
+        cv2.putText(frame, "LEVANTA LAS MANOS FRENTE A LA CAMARA", (int(w * 0.06), int(h * 0.92)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 230, 255), 2)
     cv2.rectangle(frame, (0, 0), (w, 64), (20, 20, 20), -1)
     cv2.putText(frame, gestos.estado, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
     cv2.putText(frame, "C: camara  Q: salir", (w - 175, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
@@ -518,6 +541,8 @@ def modo_camara(sock, camara, hz, ancho_preview, forzar_eleccion):
     t_envio = 0.0
     fps, t_fps, cuadros = 0.0, time.monotonic(), 0
     print(f"[DinoManos] Enviando a {HOST}:{PUERTO}. Q o ESC para salir.")
+    ventana_arriba = False
+    t_estado = 0.0
 
     try:
         while True:
@@ -526,6 +551,7 @@ def modo_camara(sock, camara, hz, ancho_preview, forzar_eleccion):
                 time.sleep(0.01)
                 continue
             frame = cv2.flip(frame, 1)  # espejo: mover la mano derecha mueve lo de la derecha
+            frame = mejorar_contraluz(cv2, frame)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             ahora = time.monotonic()
             manos = detector.detectar(rgb)
@@ -543,6 +569,19 @@ def modo_camara(sock, camara, hz, ancho_preview, forzar_eleccion):
             dibujar(cv2, frame, manos, gestos, paquete, fps)
             alto = int(frame.shape[0] * ancho_preview / frame.shape[1])
             cv2.imshow("DINO WEST - Manos", cv2.resize(frame, (ancho_preview, alto)))
+            if not ventana_arriba:
+                # Encima de Unity, para ver siempre si te está detectando.
+                try:
+                    cv2.setWindowProperty("DINO WEST - Manos", cv2.WND_PROP_TOPMOST, 1)
+                except Exception:
+                    pass
+                ventana_arriba = True
+
+            # Estado en el log cada 2 s (Logs/manos_python.log) para diagnosticar.
+            if ahora - t_estado >= 2.0:
+                t_estado = ahora
+                print(f"[DinoManos] manos={paquete['hands']} estado={gestos.estado} steer={paquete['steer']:+.2f} "
+                      f"throttle={paquete['throttle']:.2f} brillo={float(frame.mean()):.0f} fps={fps:.0f}", flush=True)
             tecla = cv2.waitKey(1) & 0xFF
             if tecla in (ord("q"), 27):
                 break
