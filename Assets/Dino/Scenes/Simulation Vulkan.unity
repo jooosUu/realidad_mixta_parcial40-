@@ -254646,6 +254646,9 @@ MonoBehaviour:
   autoConnect: 1
   expectsRawPotValues: 1
   deadzone: 0.05
+  invertirVolante: 0
+  invertirAcelerador: 0
+  umbralCorrer: 0.85
 --- !u!114 &755296877
 MonoBehaviour:
   m_ObjectHideFlags: 0
