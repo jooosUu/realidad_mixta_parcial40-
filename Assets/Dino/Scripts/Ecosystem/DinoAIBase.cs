@@ -58,6 +58,7 @@ namespace DinoVehicle
             animator = GetComponentInChildren<Animator>();
             if (animator != null)
             {
+                DinoEventosAnimacion.Asegurar(animator); // eventos Roar/Growl/... de los clips
                 animator.applyRootMotion = false;
                 animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
             }

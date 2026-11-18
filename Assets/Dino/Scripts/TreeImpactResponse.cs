@@ -308,7 +308,12 @@ namespace DinoVehicle
                 if (!oldColliders[i].isTrigger) oldColliders[i].enabled = false;
             }
 
-            BoxCollider solid = tree.gameObject.AddComponent<BoxCollider>();
+            // El sólido va en un hijo: añadir un BoxCollider en tiempo de ejecución a un objeto con
+            // malla estática combinada provoca el aviso "cannot determine their initial size".
+            var solidoGo = new GameObject(TreeReaction.NombreSolido);
+            solidoGo.layer = tree.gameObject.layer;
+            solidoGo.transform.SetParent(tree, false);
+            BoxCollider solid = solidoGo.AddComponent<BoxCollider>();
             solid.center = center;
             solid.size = size;
             solid.isTrigger = false;
@@ -444,6 +449,15 @@ namespace DinoVehicle
         Quaternion[] restLocalRotations;
         Quaternion restRootRotation;
 
+        /// <summary>Hijo con el BoxCollider del tronco que crea TreeImpactResponse.</summary>
+        public const string NombreSolido = "Tronco_Solido";
+
+        BoxCollider Solido()
+        {
+            var t = transform.Find(NombreSolido);
+            return t != null ? t.GetComponent<BoxCollider>() : GetComponent<BoxCollider>();
+        }
+
         public bool HasFallen => fallen;
         public int HitCount => hitCount;
         public int HitsToFall => hitsToFall;
@@ -452,15 +466,22 @@ namespace DinoVehicle
         {
             pivot = transform.position;
             restRootRotation = transform.rotation;
-            BoxCollider box = GetComponent<BoxCollider>();
+            BoxCollider box = Solido();
             if (box != null)
             {
                 trunkLength = Mathf.Max(1.5f, box.size.y * Mathf.Abs(transform.lossyScale.y));
             }
 
+            // Piezas que se flexionan: los hijos visibles (no el tronco sólido).
             // Árbol de una sola pieza (sin hijos): la pieza que se flexiona es la propia raíz.
-            bool sinHijos = transform.childCount == 0;
-            int count = sinHijos ? 1 : transform.childCount;
+            var hijos = new System.Collections.Generic.List<Transform>();
+            for (int i = 0; i < transform.childCount; i++)
+            {
+                var h = transform.GetChild(i);
+                if (h.name != NombreSolido) hijos.Add(h);
+            }
+            bool sinHijos = hijos.Count == 0;
+            int count = sinHijos ? 1 : hijos.Count;
             parts = new Transform[count];
             restOffsets = new Vector3[count];
             restRotations = new Quaternion[count];
@@ -468,7 +489,7 @@ namespace DinoVehicle
             restLocalRotations = new Quaternion[count];
             for (int i = 0; i < count; i++)
             {
-                parts[i] = sinHijos ? transform : transform.GetChild(i);
+                parts[i] = sinHijos ? transform : hijos[i];
                 restOffsets[i] = parts[i].position - pivot;
                 restRotations[i] = parts[i].rotation;
                 restLocalPositions[i] = parts[i].localPosition;
@@ -568,7 +589,7 @@ namespace DinoVehicle
                 parts[i].localRotation = restLocalRotations[i];
             }
 
-            Collider[] colliders = GetComponents<Collider>();
+            Collider[] colliders = GetComponentsInChildren<Collider>();
             for (int i = 0; i < colliders.Length; i++)
             {
                 if (!colliders[i].isTrigger) colliders[i].enabled = false;
@@ -602,12 +623,9 @@ namespace DinoVehicle
                     falling = false;
                     fallen = true;
                     ApplyFallRotation();
-                    Collider[] colliders = GetComponents<Collider>();
-                    for (int i = 0; i < colliders.Length; i++)
-                    {
-                        // Solo el sólido creado al inicio; el collider original del prefab sigue apagado.
-                        if (colliders[i] is BoxCollider && !colliders[i].isTrigger) colliders[i].enabled = true;
-                    }
+                    // Solo el sólido creado al inicio; el collider original del prefab sigue apagado.
+                    BoxCollider solido = Solido();
+                    if (solido != null) solido.enabled = true;
                     return;
                 }
 
