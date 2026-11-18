@@ -113,6 +113,12 @@ namespace DinoVehicle
             pelota.transform.localScale = Vector3.one * 3.2f;
 
             var ren = pelota.GetComponent<Renderer>();
+#if UNITY_EDITOR
+            // Misma piel de foca que en las escenas horneadas.
+            var piel = AssetDatabase.LoadAssetAtPath<Material>("Assets/Dino/Materials/M_DW_Pelota.mat");
+            if (ren != null && piel != null) ren.sharedMaterial = piel;
+            else
+#endif
             if (ren != null)
             {
                 var mat = new Material(Shader.Find("Standard"))
