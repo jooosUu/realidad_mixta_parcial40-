@@ -58,6 +58,7 @@ namespace DinoVehicle
                 contenedor.SetActive(false);   // así los scripts copiados no despiertan
                 contenedor.transform.SetParent(transform, false);
                 var copia = Instantiate(fuente.gameObject, contenedor.transform);
+                copia.SetActive(true); // el modelo del vehículo puede estar oculto por la montura elegida
                 copia.transform.localPosition = Vector3.zero;
                 copia.transform.localRotation = Quaternion.Inverse(vehiculo.transform.rotation) * fuente.rotation;
                 copia.transform.localScale = fuente.lossyScale;
@@ -69,7 +70,7 @@ namespace DinoVehicle
                     if (r is SkinnedMeshRenderer smr) smr.updateWhenOffscreen = true;
                 }
                 anim = copia.GetComponentInChildren<Animator>();
-                if (anim != null) { anim.updateMode = AnimatorUpdateMode.UnscaledTime; anim.applyRootMotion = false; }
+                if (anim != null) { anim.updateMode = AnimatorUpdateMode.UnscaledTime; anim.applyRootMotion = false; DinoEventosAnimacion.Asegurar(anim); }
                 modelo = contenedor.transform;
                 contenedor.SetActive(true);
 
@@ -178,12 +179,61 @@ namespace DinoVehicle
 
         public void Rugir()
         {
-            if (anim == null) return;
+            // Sin controller listo, SetTrigger avisa "Animator is not playing an AnimatorController".
+            if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null || !anim.isInitialized) return;
             foreach (var p in anim.parameters)
                 if (p.name == "Roar" && p.type == AnimatorControllerParameterType.Trigger) { anim.SetTrigger("Roar"); return; }
+            // Controllers de la fauna: Roar es un estado, no un trigger.
+            if (anim.HasState(0, Animator.StringToHash("Roar"))) anim.CrossFadeInFixedTime("Roar", 0.2f);
         }
 
-        public void CambiarModelo(int mountIdx)
+        /// <summary>
+        /// Foto de la montura para su tarjeta del menú: la pone en el escenario, la encuadra centrada y la renderiza.
+        /// El escenario tiene que estar encendido. Deja puesta esa montura (luego se vuelve a elegir la actual).
+        /// </summary>
+        public Texture2D Miniatura(int mountIdx, int ancho, int alto)
+        {
+            CambiarModelo(mountIdx, false);
+            if (modelo == null || cam == null) return null;
+            if (anim != null && anim.runtimeAnimatorController != null)
+            {
+                anim.Update(0f);
+                anim.Update(0.4f); // pose de reposo, no la de enlace (brazos abiertos)
+            }
+            modelo.localRotation = Quaternion.Euler(0f, yawBase + 25f, 0f) * rotBase;
+
+            var b = Limites(modelo.gameObject);
+            float radio = b.extents.magnitude;
+            float dist = radio / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 0.62f;
+            var posAntes = cam.transform.position;
+            var rotAntes = cam.transform.rotation;
+            float aspectoAntes = cam.aspect;
+            cam.transform.position = b.center + Quaternion.Euler(12f, 0f, 0f) * new Vector3(0f, 0f, -dist);
+            cam.transform.LookAt(b.center);
+            cam.aspect = (float)ancho / alto;
+
+            var rt = RenderTexture.GetTemporary(ancho, alto, 24, RenderTextureFormat.ARGB32);
+            var prevRt = cam.targetTexture;
+            cam.targetTexture = rt;
+            cam.Render();
+            cam.targetTexture = prevRt;
+            var prevActivo = RenderTexture.active;
+            RenderTexture.active = rt;
+            var tex = new Texture2D(ancho, alto, TextureFormat.RGB24, false) { name = "Miniatura " + mountIdx };
+            tex.ReadPixels(new Rect(0, 0, ancho, alto), 0, 0);
+            tex.Apply();
+            RenderTexture.active = prevActivo;
+            RenderTexture.ReleaseTemporary(rt);
+
+            cam.transform.SetPositionAndRotation(posAntes, rotAntes);
+            cam.aspect = aspectoAntes;
+            cam.ResetAspect();
+            return tex;
+        }
+
+        public void CambiarModelo(int mountIdx) => CambiarModelo(mountIdx, true);
+
+        public void CambiarModelo(int mountIdx, bool rugir)
         {
             if (mountIdx < 0 || mountIdx >= DinoMountManager.Mounts.Length) mountIdx = 0;
             var def = DinoMountManager.Mounts[mountIdx];
@@ -196,8 +246,10 @@ namespace DinoVehicle
 
             if (modelo != null)
             {
-                Destroy(modelo.gameObject);
+                // Inmediato: con Destroy el modelo anterior seguía visible este cuadro (y salía en las miniaturas).
+                DestroyImmediate(modelo.gameObject);
                 modelo = null;
+                anim = null;
             }
 
             var vehiculo = FindAnyObjectByType<DinoVehicleController>();
@@ -222,9 +274,12 @@ namespace DinoVehicle
                 contenedor.transform.SetParent(transform, false);
 
                 var copia = Instantiate(prefab, contenedor.transform);
+                // El modelo del vehículo puede estar oculto (DinoMountManager lo apaga si la última montura
+                // elegida no era el Carnotauro): la copia nacía oculta y el dino no aparecía en el menú.
+                copia.SetActive(true);
                 copia.transform.localPosition = Vector3.zero;
                 copia.transform.localRotation = Quaternion.identity;
-                copia.transform.localScale = Vector3.one * def.VisualScale;
+                copia.transform.localScale = prefab.scene.IsValid() ? prefab.transform.lossyScale : Vector3.one * def.VisualScale;
                 Limpiar(copia);
 
                 foreach (var t in copia.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = Capa;
@@ -244,12 +299,13 @@ namespace DinoVehicle
                 anim = copia.GetComponentInChildren<Animator>();
                 if (anim != null)
                 {
+                    DinoEventosAnimacion.Asegurar(anim); // los clips de rugido traen eventos (Roar, ThroatEffect...)
                     anim.updateMode = AnimatorUpdateMode.UnscaledTime;
                     anim.applyRootMotion = false;
 #if UNITY_EDITOR
                     if (mountIdx == 1) anim.runtimeAnimatorController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/Dino/Animators/Ctrl_Velociraptor.controller") ?? UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/PBRVelociraptor/Animators/DemoAnimatorA.controller");
                     else if (mountIdx == 2) anim.runtimeAnimatorController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/Dino/Animators/Ctrl_Pachycephalosaurus.controller") ?? UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/FerociousIndustries/PBRDinosaurs/PBRPachycephalasaurus/Animators/DemoAnimatorA.controller");
-                    else if (mountIdx == 3) anim.runtimeAnimatorController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/FerociousIndustries/PBRDinosaurs/PBRStegasaurus/Animators/DemoAnimator_Idle.controller");
+                    else if (mountIdx == 3) anim.runtimeAnimatorController = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/Dino/Animators/Ctrl_Stegosaurus.controller") ?? UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/FerociousIndustries/PBRDinosaurs/PBRStegasaurus/Animators/DemoAnimator_Idle.controller");
 #endif
                 }
 
@@ -279,7 +335,7 @@ namespace DinoVehicle
                 }
 
                 Encuadrar();
-                Rugir();
+                if (rugir) Rugir();
             }
         }
 

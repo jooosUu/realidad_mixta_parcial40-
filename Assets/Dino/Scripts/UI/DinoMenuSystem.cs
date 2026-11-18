@@ -62,6 +62,13 @@ namespace DinoVehicle
         int monturaSel;
         int escenarioSel;
         TextMeshProUGUI txtNombreDino, txtEscenario;
+        // Ficha del dino (derecha) y, en su lugar, vista previa del mapa cuando se elige escenario.
+        RectTransform fichaDino, panelMapa;
+        RawImage imagenMapa;
+        TextMeshProUGUI txtNombreMapa, txtSinPreview;
+        bool viendoMapa;
+        readonly List<Image> miniaturasUI = new();
+        static readonly Dictionary<int, Sprite> miniaturas = new();
         readonly List<(Image relleno, TextMeshProUGUI valor)> statsUI = new();
         readonly List<(Image[] borde, TextMeshProUGUI nombre, Image pincel)> tarjetas = new();
         PanelFilas panelAjustes, panelBitacora, panelCreditos;
@@ -183,7 +190,10 @@ namespace DinoVehicle
             txtEscenario.gameObject.AddComponent<DinoMenuPuntero>().Clic = _ => CambiarEscenario(1);
             escenarioSel = Mathf.Max(0, SceneManager.GetActiveScene().buildIndex);
 
-            // ficha del dino (derecha)
+            // ficha del dino (derecha); se oculta cuando se elige escenario
+            var pantalla = p;
+            fichaDino = Estirar(pantalla, "Ficha del dino");
+            p = fichaDino;
             Texto(p, "Elige tu montura", 1000, 70, 820, 34, "ELIGE TU MONTURA", Bold, 22, Sangre, 900, TextAlignmentOptions.TopRight);
             Rect(p, "Filete", 1760, 108, 60, 2, Sangre);
             txtNombreDino = Texto(p, "Nombre del dino", 900, 120, 920, 120, "", Bold, 104, Hueso, 120, TextAlignmentOptions.TopRight);
@@ -208,9 +218,17 @@ namespace DinoVehicle
                 int idx = i;
                 fondoT.gameObject.AddComponent<DinoMenuPuntero>().Clic = _ => ElegirMontura(idx);
                 if (monturas[i].Disponible)
-                    Imagen(Caja(p, "Miniatura", x, cy, cw, ch), Sprite("carno_ficha"), Color.white);
+                {
+                    // Foto real de cada dino: se genera al abrir el menú (CrearMiniaturas).
+                    var mini = Imagen(Caja(p, "Miniatura", x, cy, cw, ch), Sprite("carno_ficha"), Color.white);
+                    mini.preserveAspect = true;
+                    miniaturasUI.Add(mini);
+                }
                 else
+                {
                     Texto(p, "?", x, cy + 8, cw, 64, "?", Bold, 50, Linea, 0, TextAlignmentOptions.Top);
+                    miniaturasUI.Add(null);
+                }
                 var borde = new[]
                 {
                     Rect(p, "Borde", x, cy, cw, 2, Linea), Rect(p, "Borde", x, cy + ch - 2, cw, 2, Linea),
@@ -224,7 +242,61 @@ namespace DinoVehicle
             }
             Tecla(p, x0 - 60, cy + 28, "Q", null);
             Tecla(p, x0 + monturas.Length * (cw + gap) - gap + 18, cy + 28, "E", null);
+            p = pantalla;
             BarraTeclas(p, ("Q / E", "CAMBIAR DINO"), ("ENTER", "SELECCIONAR"));
+
+            // vista previa del mapa (en el sitio de la ficha del dino)
+            panelMapa = Estirar(p, "Vista previa del mapa");
+            Texto(panelMapa, "Elige escenario", 1000, 70, 820, 34, "ELIGE ESCENARIO", Bold, 22, Sangre, 900, TextAlignmentOptions.TopRight);
+            Rect(panelMapa, "Filete", 1760, 108, 60, 2, Sangre);
+            txtNombreMapa = Texto(panelMapa, "Nombre del mapa", 820, 120, 1000, 120, "", Bold, 84, Hueso, 120, TextAlignmentOptions.TopRight);
+            Rect(panelMapa, "Marco", 816, 256, 1008, 572, Linea);
+            imagenMapa = Caja(panelMapa, "Imagen del mapa", 820, 260, 1000, 564).gameObject.AddComponent<RawImage>();
+            imagenMapa.raycastTarget = false;
+            txtSinPreview = Texto(panelMapa, "Sin vista previa", 820, 520, 1000, 40, "SIN VISTA PREVIA", Semi, 22, Gris, 200, TextAlignmentOptions.Top);
+            Texto(panelMapa, "Ayuda mapa", 820, 846, 1000, 30, "IZQ / DER  CAMBIAR ESCENARIO   ·   ENTER  MONTAR", Semi, 18, Gris, 300, TextAlignmentOptions.TopRight);
+            panelMapa.gameObject.SetActive(false);
+            listaTitulo.AlSeleccionar = i => VerMapa(i == 1);
+        }
+
+        /// <summary>Con "Escenario" seleccionado se ve el mapa en lugar del dino.</summary>
+        void VerMapa(bool si)
+        {
+            if (fichaDino == null || panelMapa == null) return;
+            viendoMapa = si;
+            fichaDino.gameObject.SetActive(!si);
+            panelMapa.gameObject.SetActive(si);
+            if (escenario != null) escenario.MostrarDino(!si && monturas[monturaSel].Disponible);
+            if (si) ActualizarPreviewMapa();
+        }
+
+        void ActualizarPreviewMapa()
+        {
+            if (imagenMapa == null) return;
+            string ruta = SceneUtility.GetScenePathByBuildIndex(escenarioSel);
+            txtNombreMapa.text = NombreEscena(ruta).ToUpperInvariant();
+            var tex = Resources.Load<Texture2D>("DinoUI/Mapas/" + System.IO.Path.GetFileNameWithoutExtension(ruta));
+            imagenMapa.texture = tex;
+            imagenMapa.color = tex != null ? Color.white : Alfa(Hex("#100B09"), 0.9f);
+            txtSinPreview.gameObject.SetActive(tex == null);
+        }
+
+        /// <summary>Foto de cada montura en su tarjeta (se hace una vez y se reutiliza).</summary>
+        void CrearMiniaturas()
+        {
+            if (escenario == null) return;
+            for (int i = 0; i < monturas.Length && i < miniaturasUI.Count; i++)
+            {
+                if (miniaturasUI[i] == null || !monturas[i].Disponible) continue;
+                if (!miniaturas.TryGetValue(i, out var sp) || sp == null)
+                {
+                    var tex = escenario.Miniatura(i, 280, 168);
+                    if (tex == null) continue;
+                    sp = UnityEngine.Sprite.Create(tex, new UnityEngine.Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+                    miniaturas[i] = sp;
+                }
+                miniaturasUI[i].sprite = sp;
+            }
         }
 
         void ElegirMontura(int i)
@@ -263,7 +335,11 @@ namespace DinoVehicle
                 tarjetas[k].pincel.enabled = on;
                 tarjetas[k].nombre.color = on ? Hueso : monturas[k].Disponible ? Arena : Apagado;
             }
-            if (escenario != null) escenario.CambiarModelo(monturaSel);
+            if (escenario != null)
+            {
+                escenario.CambiarModelo(monturaSel);
+                if (viendoMapa) escenario.MostrarDino(false);
+            }
             listaTitulo.FijarActivo(0, m.Disponible);
         }
 
@@ -272,6 +348,7 @@ namespace DinoVehicle
             int n = Mathf.Max(1, SceneManager.sceneCountInBuildSettings);
             escenarioSel = ((escenarioSel + d) % n + n) % n;
             txtEscenario.text = "<  " + NombreEscena(SceneUtility.GetScenePathByBuildIndex(escenarioSel)).ToUpperInvariant() + "  >";
+            if (viendoMapa) ActualizarPreviewMapa();
         }
 
         void Montar()
@@ -301,10 +378,12 @@ namespace DinoVehicle
             Congelar();
             if (escenario == null) escenario = DinoEscenarioInicio.Crear();
             escenario.Encender();
+            CrearMiniaturas();
             historial.Clear();
             mostrarTituloAlCargar = false;
             CambiarEscenario(0);
             ElegirMontura(monturaSel);
+            VerMapa(listaTitulo.Seleccion == 1);
             Mostrar(Estado.Titulo);
             capturando = false;
         }
@@ -333,6 +412,7 @@ namespace DinoVehicle
             {
                 "Simulation" => "Valle de simulación",
                 "DinoTestTrack" => "Pista de pruebas",
+                "Simulation Vulkan" => "Volcán",
                 _ => n,
             };
         }
@@ -478,25 +558,31 @@ namespace DinoVehicle
             if (capturando) return;
             if (!Abierto)
             {
-                // ESC/P, o pellizco mantenido 1 s con la mano izquierda (MediaPipe).
-                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P) || MediaPipeHandReceiver.ConsumirPausa())
+                // ESC/P, pellizco mantenido 1 s con la mano izquierda (MediaPipe)
+                // o los dos botones del mando mantenidos 1 s.
+                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P)
+                    || MediaPipeHandReceiver.ConsumirPausa() || ArduinoSerialConnector.ConsumirPausa()
+                    || DinoGamepadConnector.Pausa) // botón + del mando de Switch
                     StartCoroutine(AbrirDesdeJuego(Estado.Pausa, 0));
                 return;
             }
 
-            bool arriba = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W);
-            bool abajo = Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S);
-            bool izq = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A);
-            bool der = Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D);
-            bool ok = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space);
-            bool atras = Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace);
+            bool arriba = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W) || DinoGamepadConnector.Arriba;
+            bool abajo = Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S) || DinoGamepadConnector.Abajo;
+            bool izq = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A) || DinoGamepadConnector.Izquierda;
+            bool der = Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D) || DinoGamepadConnector.Derecha;
+            bool ok = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)
+                || DinoGamepadConnector.Aceptar;
+            bool atras = Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)
+                || ArduinoSerialConnector.ConsumirAtras() // botón 2 del mando
+                || DinoGamepadConnector.Atras || DinoGamepadConnector.Pausa; // B o + del mando de Switch
 
             switch (Actual)
             {
                 case Estado.Titulo:
                     Navegar(listaTitulo, arriba, abajo, ok);
-                    if (Input.GetKeyDown(KeyCode.Q)) ElegirMontura(monturaSel - 1);
-                    if (Input.GetKeyDown(KeyCode.E)) ElegirMontura(monturaSel + 1);
+                    if (Input.GetKeyDown(KeyCode.Q) || DinoGamepadConnector.Anterior) ElegirMontura(monturaSel - 1);
+                    if (Input.GetKeyDown(KeyCode.E) || DinoGamepadConnector.Siguiente) ElegirMontura(monturaSel + 1);
                     if (listaTitulo.Seleccion == 1 && (izq || der)) CambiarEscenario(izq ? -1 : 1);
                     break;
                 case Estado.Pausa: Navegar(listaPausa, arriba, abajo, ok); if (atras) { Cerrar(); return; } break;
@@ -505,9 +591,9 @@ namespace DinoVehicle
                     if (abajo) panelAjustes.Mover(1);
                     if (izq) panelAjustes.Ajustar(-1);
                     if (der) panelAjustes.Ajustar(1);
-                    if (Input.GetKeyDown(KeyCode.Q)) panelAjustes.Pestana(panelAjustes.PestanaActual - 1);
-                    if (Input.GetKeyDown(KeyCode.E)) panelAjustes.Pestana(panelAjustes.PestanaActual + 1);
-                    if (Input.GetKeyDown(KeyCode.R)) panelAjustes.Restablecer();
+                    if (Input.GetKeyDown(KeyCode.Q) || DinoGamepadConnector.Anterior) panelAjustes.Pestana(panelAjustes.PestanaActual - 1);
+                    if (Input.GetKeyDown(KeyCode.E) || DinoGamepadConnector.Siguiente) panelAjustes.Pestana(panelAjustes.PestanaActual + 1);
+                    if (Input.GetKeyDown(KeyCode.R) || DinoGamepadConnector.Restablecer) panelAjustes.Restablecer();
                     break;
                 case Estado.Bitacora: panelBitacora.Refrescar(); break;
             }
@@ -684,6 +770,8 @@ namespace DinoVehicle
             }
 
             public int Seleccion => sel;
+            /// <summary>Se llama cada vez que cambia la opción seleccionada.</summary>
+            public Action<int> AlSeleccionar;
 
             public void FijarActivo(int i, bool activo)
             {
@@ -694,7 +782,9 @@ namespace DinoVehicle
 
             public void Seleccionar(int i)
             {
+                bool cambio = sel != i;
                 sel = i;
+                if (cambio) AlSeleccionar?.Invoke(i);
                 for (int k = 0; k < items.Length; k++)
                 {
                     var it = items[k];

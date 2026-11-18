@@ -6,9 +6,11 @@ using UnityEngine.UI;
 namespace DinoVehicle
 {
     /// <summary>
-    /// Puntero controlado con una mano (MediaPipe) para los menús de DinoMenuSystem.
-    /// - Solo aparece con el menú abierto y una mano visible (modo cursor del script de Python).
-    /// - Pasar por encima de una opción la selecciona (OnPointerEnter) y el pellizco pulgar+índice hace clic.
+    /// Puntero para los menús de DinoMenuSystem controlado con una mano (MediaPipe) o con el mando Arduino.
+    /// - Mano: aparece con una mano visible; el pellizco pulgar+índice hace clic.
+    /// - Mando: potenciómetro 1 = horizontal, potenciómetro 2 = vertical, botón 1 = clic.
+    ///   Si se usan los dos, manda el que se tocó en los últimos segundos.
+    /// - Pasar por encima de una opción la selecciona (OnPointerEnter).
     /// - Mantener el pellizco arrastra (deslizadores). El ratón y el teclado siguen funcionando igual.
     /// </summary>
     public class DinoHandCursor : MonoBehaviour
@@ -21,6 +23,7 @@ namespace DinoVehicle
         GameObject sobre;          // objeto bajo el puntero
         GameObject presionado;     // objeto al empezar el pellizco
         bool pinchAntes;
+        Vector2 cursorMando = new Vector2(0.5f, 0.5f);
         PointerEventData evento;
         readonly List<RaycastResult> resultados = new();
 
@@ -62,7 +65,11 @@ namespace DinoVehicle
         void Update()
         {
             if (menu == null) menu = DinoMenuSystem.Instancia;
-            bool activo = menu != null && menu.Abierto && MediaPipeHandReceiver.HayCursor;
+            bool manos = MediaPipeHandReceiver.HayCursor;
+            bool mando = ArduinoSerialConnector.Conectado;
+            // El mando manda si se tocó hace poco o si no hay mano visible.
+            bool usarMando = mando && (!manos || Time.unscaledTime - ArduinoSerialConnector.UltimoUso < 4f);
+            bool activo = menu != null && menu.Abierto && (manos || mando);
             if (!activo)
             {
                 if (canvas.enabled) Soltar();
@@ -73,11 +80,22 @@ namespace DinoVehicle
 
             canvas.enabled = true;
             // El script envía y de arriba hacia abajo; en pantalla Unity y crece hacia arriba.
-            Vector2 c = MediaPipeHandReceiver.Cursor;
+            Vector2 c;
+            if (usarMando)
+            {
+                // Potenciómetro 2 arriba = puntero arriba. Suavizado para que no tiemble.
+                var destinoMando = new Vector2(ArduinoSerialConnector.Pot1, 1f - ArduinoSerialConnector.Pot2);
+                cursorMando = Vector2.Lerp(cursorMando, destinoMando, 1f - Mathf.Exp(-18f * Time.unscaledDeltaTime));
+                c = cursorMando;
+            }
+            else
+            {
+                c = MediaPipeHandReceiver.Cursor;
+            }
             Vector2 pos = new Vector2(c.x * Screen.width, (1f - c.y) * Screen.height);
             puntero.position = pos;
 
-            bool pinch = MediaPipeHandReceiver.Pinch;
+            bool pinch = usarMando ? ArduinoSerialConnector.Boton1 : MediaPipeHandReceiver.Pinch;
             anillo.color = pinch ? new Color(0.85f, 0.15f, 0.1f, 0.95f) : new Color(1f, 0.95f, 0.85f, 0.85f);
             centro.color = pinch ? Color.white : new Color(0.85f, 0.15f, 0.1f, 0.9f);
             puntero.localScale = Vector3.one * (pinch ? 0.8f : 1f);
