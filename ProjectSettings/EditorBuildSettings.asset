@@ -11,4 +11,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Dino/Scenes/DinoTestTrack.unity
     guid: ce8e5fa7645cd98459d58fbf7e5bacd0
+  - enabled: 1
+    path: Assets/Dino/Scenes/Simulation Vulkan.unity
+    guid: f2c820110775bc748bcb2fbbf6d23a9f
   m_configObjects: {}
