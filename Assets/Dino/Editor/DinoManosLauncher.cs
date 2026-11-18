@@ -13,6 +13,8 @@ namespace DinoVehicle.Editor
     /// 2. Si faltan opencv/mediapipe, ejecuta "pip install -r Tools/requirements.txt" en segundo plano.
     /// 3. Lanza el script (abre la ventana de preview de la webcam) y lo cierra al cerrar Unity.
     /// Si se cierra la ventana de preview, se vuelve a lanzar al darle a Play.
+    /// La cámara se elige la primera vez (o con DINO WEST ▸ Control por manos ▸ Elegir cámara) y se recuerda
+    /// en Tools/camara_elegida.json; en el preview, la tecla C cambia de cámara.
     /// Menú: DINO WEST ▸ Control por manos. La salida de Python queda en Logs/manos_python.log.
     /// </summary>
     [InitializeOnLoad]
@@ -78,6 +80,14 @@ namespace DinoVehicle.Editor
             Debug.Log("[Manos] Control por manos detenido.");
         }
 
+        [MenuItem("DINO WEST/Control por manos/Elegir cámara...", priority = 3)]
+        static void ElegirCamaraMenu()
+        {
+            Detener();
+            Iniciar(true, argsExtra: "--elegir");
+            Debug.Log("[Manos] Elige la cámara en la ventana que se abre (número o clic). Se recordará la próxima vez.");
+        }
+
         [MenuItem("DINO WEST/Control por manos/Reinstalar dependencias de Python", priority = 20)]
         static void ReinstalarMenu()
         {
@@ -114,7 +124,7 @@ namespace DinoVehicle.Editor
             }
         }
 
-        public static void Iniciar(bool avisarSiYaCorre, bool forzarInstalacion = false)
+        public static void Iniciar(bool avisarSiYaCorre, bool forzarInstalacion = false, string argsExtra = "")
         {
             if (EstaCorriendo())
             {
@@ -131,13 +141,13 @@ namespace DinoVehicle.Editor
             // Todo lo lento (buscar Python, pip) va en un hilo para no congelar el editor.
             new Thread(() =>
             {
-                try { Preparar(forzarInstalacion); }
+                try { Preparar(forzarInstalacion, argsExtra); }
                 catch (Exception e) { Debug.LogWarning($"[Manos] No se pudo iniciar el control por manos: {e.Message}"); }
                 finally { Interlocked.Exchange(ref arrancando, 0); }
             }) { IsBackground = true, Name = "DinoManosLauncher" }.Start();
         }
 
-        static void Preparar(bool forzarInstalacion)
+        static void Preparar(bool forzarInstalacion, string argsExtra)
         {
             var (exe, prefijo) = BuscarPython();
             if (exe == null)
@@ -160,7 +170,7 @@ namespace DinoVehicle.Editor
                 Debug.Log("<color=green>[Manos]</color> Dependencias instaladas.");
             }
 
-            var psi = new ProcessStartInfo(exe, $"{prefijo}-u \"{Script}\"")
+            var psi = new ProcessStartInfo(exe, $"{prefijo}-u \"{Script}\" {argsExtra}")
             {
                 WorkingDirectory = Raiz,
                 UseShellExecute = false,

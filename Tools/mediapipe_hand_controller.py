@@ -16,11 +16,12 @@ Lee la webcam, detecta hasta 2 manos y envía el estado a Unity en JSON por UDP 
     - La punta del índice mueve el cursor; pellizco pulgar+índice = clic.
 
 Uso:
-    python Tools/mediapipe_hand_controller.py            # webcam 0
+    python Tools/mediapipe_hand_controller.py            # cámara elegida la última vez (o pregunta)
+    python Tools/mediapipe_hand_controller.py --elegir   # vuelve a mostrar el selector de cámara
     python Tools/mediapipe_hand_controller.py --camara 1
     python Tools/mediapipe_hand_controller.py --prueba   # sin webcam: envía datos sintéticos
 
-Teclas en la ventana de preview: Q o ESC para salir.
+Teclas en la ventana de preview: C cambia de cámara, Q o ESC para salir.
 """
 
 import argparse
@@ -46,6 +47,138 @@ CONEXIONES = [
 MODELO_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
               "hand_landmarker/float16/latest/hand_landmarker.task")
 MODELO_RUTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "hand_landmarker.task")
+# Cámara elegida por el usuario (se recuerda entre ejecuciones).
+CAMARA_GUARDADA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camara_elegida.json")
+MAX_CAMARAS = 6
+
+
+# ----------------------------------------------------------------------------------------
+# Cámaras: abrir, listar con miniatura y elegir
+# ----------------------------------------------------------------------------------------
+def abrir_camara(cv2, indice):
+    cap = cv2.VideoCapture(indice, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(indice)
+    if not cap.isOpened():
+        cap.release()
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Algunas cámaras virtuales dan los primeros cuadros vacíos.
+    for _ in range(5):
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            return cap
+        time.sleep(0.05)
+    cap.release()
+    return None
+
+
+def nombres_camaras():
+    """Nombres de las cámaras de Windows (orientativo: el orden puede no coincidir con los índices)."""
+    if os.name != "nt":
+        return []
+    try:
+        import subprocess
+        salida = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in 'Camera','Image' } | "
+             "ForEach-Object { $_.Name }"],
+            capture_output=True, text=True, timeout=8, creationflags=0x08000000)
+        return [n.strip() for n in salida.stdout.splitlines() if n.strip()]
+    except Exception:
+        return []
+
+
+def listar_camaras(cv2):
+    """Devuelve [(indice, miniatura)] de las cámaras que entregan imagen."""
+    encontradas = []
+    for i in range(MAX_CAMARAS):
+        cap = abrir_camara(cv2, i)
+        if cap is None:
+            continue
+        ok, frame = cap.read()
+        cap.release()
+        if ok and frame is not None:
+            encontradas.append((i, cv2.flip(frame, 1)))
+    return encontradas
+
+
+def leer_camara_guardada():
+    try:
+        with open(CAMARA_GUARDADA, encoding="utf-8") as f:
+            return int(json.load(f)["indice"])
+    except Exception:
+        return None
+
+
+def guardar_camara(indice):
+    try:
+        with open(CAMARA_GUARDADA, "w", encoding="utf-8") as f:
+            json.dump({"indice": indice}, f)
+    except Exception:
+        pass
+
+
+def elegir_camara(cv2):
+    """Ventana con una miniatura por cámara: número o clic para elegir. Devuelve el índice o None."""
+    print("[DinoManos] Buscando cámaras...")
+    camaras = listar_camaras(cv2)
+    if not camaras:
+        return None
+    if len(camaras) == 1:
+        return camaras[0][0]
+
+    nombres = nombres_camaras()
+    if nombres:
+        print("[DinoManos] Cámaras de Windows: " + " | ".join(nombres))
+
+    import numpy as np
+    tw, th = 320, 240
+    columnas = min(3, len(camaras))
+    filas = (len(camaras) + columnas - 1) // columnas
+    lienzo = np.zeros((filas * th + 60, columnas * tw, 3), dtype=np.uint8)
+    cajas = []
+    for k, (indice, img) in enumerate(camaras):
+        x, y = (k % columnas) * tw, (k // columnas) * th + 60
+        lienzo[y:y + th, x:x + tw] = cv2.resize(img, (tw, th))
+        cv2.rectangle(lienzo, (x, y), (x + tw - 1, y + th - 1), (60, 60, 60), 2)
+        cv2.rectangle(lienzo, (x + 6, y + 6), (x + 120, y + 42), (20, 20, 20), -1)
+        cv2.putText(lienzo, f"{k + 1}  (cam {indice})", (x + 12, y + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cajas.append((x, y, indice))
+    cv2.putText(lienzo, "ELIGE LA CAMARA: pulsa su numero o haz clic", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.putText(lienzo, "(luego, en el preview, C cambia de camara)", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+    elegida = {"v": None}
+
+    def clic(evento, x, y, *_):
+        if evento == cv2.EVENT_LBUTTONDOWN:
+            for cx, cy, indice in cajas:
+                if cx <= x < cx + tw and cy <= y < cy + th:
+                    elegida["v"] = indice
+
+    titulo = "DINO WEST - Elegir camara"
+    cv2.namedWindow(titulo)
+    cv2.setMouseCallback(titulo, clic)
+    while elegida["v"] is None:
+        cv2.imshow(titulo, lienzo)
+        tecla = cv2.waitKey(30) & 0xFF
+        if ord("1") <= tecla < ord("1") + len(camaras):
+            elegida["v"] = camaras[tecla - ord("1")][0]
+        elif tecla == 27:
+            elegida["v"] = camaras[0][0]
+        if cv2.getWindowProperty(titulo, cv2.WND_PROP_VISIBLE) < 1:
+            elegida["v"] = elegida["v"] if elegida["v"] is not None else camaras[0][0]
+    cv2.destroyWindow(titulo)
+    return elegida["v"]
+
+
+def siguiente_camara(cv2, actual):
+    """Prueba los índices siguientes al actual y devuelve (indice, cap) de la primera que funcione."""
+    for paso in range(1, MAX_CAMARAS + 1):
+        i = (actual + paso) % MAX_CAMARAS
+        cap = abrir_camara(cv2, i)
+        if cap is not None:
+            return i, cap
+    return actual, None
 
 
 # ----------------------------------------------------------------------------------------
@@ -314,6 +447,7 @@ def dibujar(cv2, frame, manos, gestos, paquete, fps):
     ok = paquete["hands"] > 0
     cv2.rectangle(frame, (0, 0), (w, 64), (20, 20, 20), -1)
     cv2.putText(frame, gestos.estado, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+    cv2.putText(frame, "C: camara  Q: salir", (w - 175, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
     cv2.putText(frame, f"MANOS: {'OK' if ok else 'NO'} ({paquete['hands']})  steer {paquete['steer']:+.2f}  "
                        f"thr {paquete['throttle']:.2f}  {fps:.0f} fps",
                 (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 120) if ok else (0, 0, 255), 1)
@@ -355,19 +489,27 @@ def modo_prueba(sock, hz):
         pass
 
 
-def modo_camara(sock, camara, hz, ancho_preview):
+def modo_camara(sock, camara, hz, ancho_preview, forzar_eleccion):
     try:
         import cv2
     except ImportError:
         sys.exit("Falta OpenCV: pip install -r Tools/requirements.txt")
 
-    cap = cv2.VideoCapture(camara, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(camara)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(camara)
-    if not cap.isOpened():
-        sys.exit(f"No se pudo abrir la webcam {camara}. Prueba con --camara 1")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Prioridad: --camara N > cámara guardada > ventana para elegir.
+    if camara is None and not forzar_eleccion:
+        camara = leer_camara_guardada()
+    cap = abrir_camara(cv2, camara) if camara is not None else None
+    if cap is None:
+        if camara is not None:
+            print(f"[DinoManos] La cámara {camara} no responde; elige otra.")
+        camara = elegir_camara(cv2)
+        if camara is None:
+            sys.exit("No se encontró ninguna cámara.")
+        cap = abrir_camara(cv2, camara)
+        if cap is None:
+            sys.exit(f"No se pudo abrir la cámara {camara}.")
+    guardar_camara(camara)
+    print(f"[DinoManos] Usando la cámara {camara} (C en el preview para cambiar).")
 
     detector = DetectorManos()
     gestos = Gestos()
@@ -401,8 +543,21 @@ def modo_camara(sock, camara, hz, ancho_preview):
             dibujar(cv2, frame, manos, gestos, paquete, fps)
             alto = int(frame.shape[0] * ancho_preview / frame.shape[1])
             cv2.imshow("DINO WEST - Manos", cv2.resize(frame, (ancho_preview, alto)))
-            if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+            tecla = cv2.waitKey(1) & 0xFF
+            if tecla in (ord("q"), 27):
                 break
+            if tecla in (ord("c"), ord("C")):
+                # Cambiar a la siguiente cámara que funcione y recordarla.
+                cap.release()
+                nueva, cap_nueva = siguiente_camara(cv2, camara)
+                if cap_nueva is None:
+                    cap = abrir_camara(cv2, camara)
+                else:
+                    camara, cap = nueva, cap_nueva
+                    guardar_camara(camara)
+                    print(f"[DinoManos] Cámara cambiada a {camara}.")
+                if cap is None:
+                    sys.exit("Se perdió la cámara.")
     finally:
         # Último paquete sin manos: Unity suelta el acelerador al instante.
         enviar(sock, seq + 1, {"hands": 0, "mode": "none", "steer": 0, "throttle": 0, "sprint": 0, "brake": 0,
@@ -415,7 +570,9 @@ def modo_camara(sock, camara, hz, ancho_preview):
 
 def main():
     ap = argparse.ArgumentParser(description="Control de DINO WEST con las manos (MediaPipe -> UDP -> Unity)")
-    ap.add_argument("--camara", type=int, default=0, help="índice de la webcam (0 por defecto)")
+    ap.add_argument("--camara", type=int, default=None,
+                    help="índice de la webcam; si no se indica se usa la elegida la última vez")
+    ap.add_argument("--elegir", action="store_true", help="muestra la ventana para elegir cámara")
     ap.add_argument("--hz", type=int, default=45, help="paquetes por segundo (30-60)")
     ap.add_argument("--preview", type=int, default=480, help="ancho de la ventana de preview en píxeles")
     ap.add_argument("--prueba", action="store_true", help="sin webcam: envía datos sintéticos para probar Unity")
@@ -427,7 +584,7 @@ def main():
         if args.prueba:
             modo_prueba(sock, hz)
         else:
-            modo_camara(sock, args.camara, hz, args.preview)
+            modo_camara(sock, args.camara, hz, args.preview, args.elegir)
     finally:
         sock.close()
 
