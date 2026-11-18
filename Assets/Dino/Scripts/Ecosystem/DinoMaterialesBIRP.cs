@@ -91,7 +91,8 @@ namespace DinoVehicle
                 || n.Contains("HDRP")
                 || n.StartsWith("Shader Graphs/")
                 || n.StartsWith("URP")
-                || n.Contains("Lit") && !n.StartsWith("Standard");
+                // Otros "Lit" de terceros (no Standard). Los Unlit se dejan: convertirlos les metería iluminación.
+                || n.Contains("Lit") && !n.StartsWith("Standard") && !n.Contains("Unlit");
         }
 
         static bool TieneMascaraURP(Material m)
