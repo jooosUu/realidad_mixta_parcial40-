@@ -131,9 +131,9 @@ namespace DinoVehicle
             energia.rectTransform.sizeDelta = new Vector2(300 * Mathf.Clamp01(Energia), 4);
             energiaTxt.text = $"{Energia * 100:0} %";
 
-            var ard = FindAnyObjectByType<ArduinoSerialConnector>();
-            bool con = ard != null && ard.IsConnected;
-            arduinoTxt.text = con ? $"ARDUINO CONECTADO · {ard.portName}" : "ARDUINO DESCONECTADO · TECLADO";
+            var ard = ArduinoSerialConnector.Activo;
+            bool con = ArduinoSerialConnector.Conectado;
+            arduinoTxt.text = con ? $"MANDO CONECTADO · {ard.portName}" : "MANDO DESCONECTADO · TECLADO";
             puntoArduino.color = con ? Sangre : Gris;
 
             // Control por manos (MediaPipe)
