@@ -8,12 +8,14 @@ Lee la webcam, detecta hasta 2 manos y envía el estado a Unity en JSON por UDP 
     - Manos abiertas con pulgares recogidos = CAMINAR (throttle 0.45).
     - Manos abiertas con pulgares extendidos (o manos elevadas) = CORRER (throttle 1.0, sprint 1).
     - Ambas manos en puño = FRENO.
-    - Subir las dos manos de golpe = SALTO (cooldown 0.7 s).
+    - Subir las dos manos rápido (un palmo) = SALTO (cooldown 0.7 s).
     - Pellizco pulgar+índice con la mano derecha = RUGIDO (cooldown 0.8 s).
-    - Pellizco mantenido 1 s con la mano izquierda = PAUSA (abre el menú).
+    - "V" con las dos manos (o juntarlas) medio segundo = PAUSA; repetirlo la quita.
+      (También vale el pellizco mantenido 1 s con la mano izquierda.)
 
   1 mano   (MENÚ / CURSOR)
     - La punta del índice mueve el cursor; pellizco pulgar+índice = clic.
+    - Puño cerrado 0.7 s = ATRÁS (sale del menú o de la pausa).
 
 Uso:
     python Tools/mediapipe_hand_controller.py            # cámara elegida la última vez (o pregunta)
@@ -244,6 +246,16 @@ def pellizco_ratio(lm):
     return dist(lm[4], lm[8]) / tam_palma(lm)
 
 
+def dedo_extendido(lm, punta, pip):
+    return dist(lm[punta], lm[0]) > dist(lm[pip], lm[0]) * 1.08
+
+
+def gesto_v(lm):
+    """Señal de "V": índice y medio estirados, anular y meñique doblados."""
+    return (dedo_extendido(lm, 8, 6) and dedo_extendido(lm, 12, 10)
+            and not dedo_extendido(lm, 16, 14) and not dedo_extendido(lm, 20, 18))
+
+
 def gesto_ok(lm, umbral=0.33):
     """Pellizco tipo "OK": pulgar e índice juntos y al menos 2 de los otros 3 dedos estirados (un puño no cuenta)."""
     otros = sum(1 for punta, pip in ((12, 10), (16, 14), (20, 18)) if dist(lm[punta], lm[0]) > dist(lm[pip], lm[0]) * 1.08)
@@ -309,8 +321,13 @@ class Gestos:
     ZONA_MUERTA = 6.0      # grados
     GIRO_MAX = 40.0        # grados para giro completo
     CD_SALTO = 0.7
+    SALTO_SUBIDA = 0.10    # fracción de la altura de la imagen
+    SALTO_VENTANA = 0.40   # segundos
     CD_RUGIDO = 0.8
     PAUSA_MANTENER = 1.0
+    PAUSA_JUNTAS = 0.20    # distancia entre muñecas (fracción del ancho de la imagen)
+    PAUSA_JUNTAS_T = 0.5   # segundos con las manos juntas
+    ATRAS_PUNO_T = 0.7     # segundos con el puño cerrado (una mano) para volver atrás
 
     def __init__(self):
         self.ema_steer = EMA(0.35)
@@ -328,6 +345,11 @@ class Gestos:
         self.jump_id = 0
         self.roar_id = 0
         self.pause_id = 0
+        self.back_id = 0
+        self.hist_y = []
+        self.t_juntas = None
+        self.t_puno = None
+        self.t_atras = -9.0
         self.estado = "SIN MANOS"
 
     def procesar(self, manos, ahora):
@@ -337,17 +359,23 @@ class Gestos:
         if len(manos) >= 2:
             self._conduccion(manos, ahora, out)
         elif len(manos) == 1:
-            self._cursor(manos[0], out)
+            self._cursor(manos[0], out, ahora)
         else:
             self.ema_steer.reset()
             self.ema_throttle.reset()
             self.y_prev = None
             self.t_pellizco_izq = None
             self.estado = "SIN MANOS"
+        if len(manos) != 2:
+            self.hist_y = []
+            self.t_juntas = None
+        if len(manos) != 1:
+            self.t_puno = None
 
         out["jumpId"] = self.jump_id
         out["roarId"] = self.roar_id
         out["pauseId"] = self.pause_id
+        out["backId"] = self.back_id
         return out
 
     def _conduccion(self, manos, ahora, out):
@@ -392,12 +420,16 @@ class Gestos:
         if abs(steer) > 0.05 and self.estado in ("CAMINAR", "CORRER", "QUIETO"):
             self.estado = f"GIRO {'DER' if steer > 0 else 'IZQ'} · {self.estado}"
 
-        # Salto: las dos manos suben rápido (velocidad en alturas de imagen por segundo).
-        if self.y_prev is not None and ahora > self.t_prev:
-            vel = (self.y_prev - y_media) / (ahora - self.t_prev)
-            if vel > 1.6 and ahora - self.t_salto > self.CD_SALTO:
-                self.t_salto = ahora
-                self.jump_id += 1
+        # Salto: las dos manos suben un buen tramo (SALTO_SUBIDA de la altura de la imagen)
+        # en menos de SALTO_VENTANA segundos. Con la ventana no importa si la cámara va a 15 fps.
+        self.hist_y.append((ahora, y_media))
+        while self.hist_y and ahora - self.hist_y[0][0] > self.SALTO_VENTANA:
+            self.hist_y.pop(0)
+        y_mas_baja = max(y for _, y in self.hist_y)  # y crece hacia abajo
+        if y_mas_baja - y_media > self.SALTO_SUBIDA and ahora - self.t_salto > self.CD_SALTO:
+            self.t_salto = ahora
+            self.jump_id += 1
+            self.hist_y = [(ahora, y_media)]
         self.y_prev, self.t_prev = y_media, ahora
         if ahora - self.t_salto < 0.35:
             self.estado = "SALTO"
@@ -412,7 +444,19 @@ class Gestos:
         if ahora - self.t_rugido < 0.5:
             self.estado = "RUGIDO"
 
-        # Pausa: pellizco mantenido con la mano izquierda.
+        # Pausa: "V" (índice y medio arriba) con las dos manos un momento, o juntar las manos.
+        # Con las manos pegadas MediaPipe a veces ve una sola, por eso la V es el gesto principal.
+        juntas = (gesto_v(izq) and gesto_v(der)) or dist(izq[0], der[0]) < self.PAUSA_JUNTAS
+        if juntas:
+            if self.t_juntas is None:
+                self.t_juntas = ahora
+            elif ahora - self.t_juntas > self.PAUSA_JUNTAS_T and ahora - self.t_pausa > 2.0:
+                self.t_pausa = ahora
+                self.pause_id += 1
+        else:
+            self.t_juntas = None
+
+        # Pausa (alternativa): pellizco mantenido con la mano izquierda.
         if gesto_ok(izq, 0.33):
             if self.t_pellizco_izq is None:
                 self.t_pellizco_izq = ahora
@@ -426,11 +470,27 @@ class Gestos:
 
         out.update(steer=round(steer, 3), throttle=round(throttle, 3), sprint=sprint, brake=brake)
 
-    def _cursor(self, lm, out):
+    def _cursor(self, lm, out, ahora):
         out["mode"] = "cursor"
         self.y_prev = None
         self.ema_steer.reset()
         self.ema_throttle.reset()
+
+        # Puño cerrado un momento = ATRÁS (salir del menú o de la pausa).
+        # Mientras el puño está cerrado el puntero se queda quieto y no hace clic.
+        if dedos_extendidos(lm) == 0:
+            if self.t_puno is None:
+                self.t_puno = ahora
+            elif ahora - self.t_puno > self.ATRAS_PUNO_T and ahora - self.t_atras > 1.2:
+                self.t_atras = ahora
+                self.back_id += 1
+            self.pinch_cursor = False
+            out.update(cx=round(self.ema_cx.valor if self.ema_cx.valor is not None else 0.5, 4),
+                       cy=round(self.ema_cy.valor if self.ema_cy.valor is not None else 0.5, 4), pinch=0)
+            self.estado = "ATRAS" if ahora - self.t_atras < 0.8 else "PUNO (manten para volver)"
+            return
+        self.t_puno = None
+
         # El centro de la imagen se amplía: no hace falta llevar el dedo hasta el borde.
         def remap(v):
             return min(1.0, max(0.0, (v - 0.15) / 0.7))
@@ -601,7 +661,7 @@ def modo_camara(sock, camara, hz, ancho_preview, forzar_eleccion):
         # Último paquete sin manos: Unity suelta el acelerador al instante.
         enviar(sock, seq + 1, {"hands": 0, "mode": "none", "steer": 0, "throttle": 0, "sprint": 0, "brake": 0,
                                "cx": 0.5, "cy": 0.5, "pinch": 0, "jumpId": gestos.jump_id,
-                               "roarId": gestos.roar_id, "pauseId": gestos.pause_id})
+                               "roarId": gestos.roar_id, "pauseId": gestos.pause_id, "backId": gestos.back_id})
         detector.cerrar()
         cap.release()
         cv2.destroyAllWindows()

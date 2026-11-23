@@ -35,6 +35,15 @@ namespace DinoVehicle
         public static int ManosDetectadas { get; private set; }
 
         static int pausaPendiente;
+        static int atrasPendiente;
+
+        /// <summary>Devuelve true una sola vez por cada puño mantenido (gesto de "atrás" con una mano).</summary>
+        public static bool ConsumirAtras()
+        {
+            if (atrasPendiente <= 0) return false;
+            atrasPendiente = 0;
+            return true;
+        }
 
         /// <summary>Devuelve true una sola vez por cada gesto de pausa recibido.</summary>
         public static bool ConsumirPausa()
@@ -60,6 +69,7 @@ namespace DinoVehicle
             public int jumpId;
             public int roarId;
             public int pauseId;
+            public int backId;
         }
 
         [Tooltip("Puerto UDP donde escucha (debe coincidir con el script de Python)")]
@@ -74,7 +84,7 @@ namespace DinoVehicle
         double ultimoTiempoRecepcion = -1; // en segundos (Stopwatch), escrito por el hilo
         readonly System.Diagnostics.Stopwatch reloj = System.Diagnostics.Stopwatch.StartNew();
 
-        int jumpIdVisto = -1, roarIdVisto = -1, pauseIdVisto = -1;
+        int jumpIdVisto = -1, roarIdVisto = -1, pauseIdVisto = -1, backIdVisto = -1;
         bool avisoPuerto;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -182,9 +192,11 @@ namespace DinoVehicle
                 if (jumpIdVisto >= 0 && p.jumpId > jumpIdVisto) salto = true;
                 if (roarIdVisto >= 0 && p.roarId > roarIdVisto) rugido = true;
                 if (pauseIdVisto >= 0 && p.pauseId > pauseIdVisto) pausaPendiente = 1;
+                if (backIdVisto >= 0 && p.backId > backIdVisto) atrasPendiente = 1;
                 jumpIdVisto = p.jumpId;
                 roarIdVisto = p.roarId;
                 pauseIdVisto = p.pauseId;
+                backIdVisto = p.backId;
             }
 
             if (input == null) return;

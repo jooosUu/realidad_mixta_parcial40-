@@ -564,6 +564,7 @@ namespace DinoVehicle
                     || MediaPipeHandReceiver.ConsumirPausa() || ArduinoSerialConnector.ConsumirPausa()
                     || DinoGamepadConnector.Pausa) // botón + del mando de Switch
                     StartCoroutine(AbrirDesdeJuego(Estado.Pausa, 0));
+                MediaPipeHandReceiver.ConsumirAtras(); // un puño durante el juego no se guarda para después
                 return;
             }
 
@@ -575,7 +576,9 @@ namespace DinoVehicle
                 || DinoGamepadConnector.Aceptar;
             bool atras = Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)
                 || ArduinoSerialConnector.ConsumirAtras() // botón 2 del mando
-                || DinoGamepadConnector.Atras || DinoGamepadConnector.Pausa; // B o + del mando de Switch
+                || DinoGamepadConnector.Atras || DinoGamepadConnector.Pausa // B o + del mando de Switch
+                || MediaPipeHandReceiver.ConsumirAtras()  // puño mantenido con una mano
+                || MediaPipeHandReceiver.ConsumirPausa(); // juntar las manos otra vez cierra la pausa
 
             switch (Actual)
             {
